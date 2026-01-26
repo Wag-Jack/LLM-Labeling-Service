@@ -1,3 +1,5 @@
+/credentials
 /env
 .env
 /Data
+/__pycache__
