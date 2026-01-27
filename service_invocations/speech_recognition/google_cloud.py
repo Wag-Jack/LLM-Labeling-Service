@@ -1,34 +1,46 @@
-from datasets import load_dataset, Audio
 from google.oauth2 import service_account
 from google.cloud import speech
-import numpy as np
+import pandas as pd
 from pathlib import Path
-import soundfile as sf
 
-# Grab secret key from credentials to tap into Google Cloud Speech-to-Text API
-cred_path = Path.cwd().parent.parent / 'credentials'
-client_file = cred_path / 'speech_recognition/llm-as-a-judge_gc.json'
-credentials = service_account.Credentials.from_service_account_file(client_file)
-client = speech.SpeechClient(credentials=credentials)
+def run_gc_stt(edacc_data):
+    # Grab secret key from credentials to tap into Google Cloud Speech-to-Text API
+    cred_path = Path.cwd() / 'credentials'
+    client_file = cred_path / 'speech_recognition/llm-as-a-judge_gc.json'
+    credentials = service_account.Credentials.from_service_account_file(client_file)
+    client = speech.SpeechClient(credentials=credentials)
+    
+    data = {
+        "id": [],
+        "wav_file": [],
+        "service_output": [],
+    }
 
-# Load the audio file from the dataset and get the audio path to put into transcription request
-edacc = load_dataset(
-    "edinburghcstr/edacc",
-    split="validation[:5]"
-).cast_column("audio", Audio(decode=False))
+    for _, row in edacc_data.iterrows():
+        # Run the service on the selected file
+        audio_file = row["audio"]
+        print(audio_file)
+        with open(audio_file, 'rb') as f:
+            audio_bytes = f.read()
+        audio = speech.RecognitionAudio(content=audio_bytes)
+        config = speech.RecognitionConfig(
+            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+            language_code="en-US"
+        )
 
-sample_path = edacc[0]['audio']['path']
+        response = client.recognize(config=config, audio=audio)
 
-# Open audio file as bytes
-with open(sample_path, 'rb') as f:
-    audio_bytes = f.read()
+        data["id"].append(f"gc_tts_{row['id']:04d}")
+        data["wav_file"].append(row["audio"])
+        print(response, end='\n\n')
 
-audio = speech.RecognitionAudio(content=audio_bytes)
-config = speech.RecognitionConfig(
-    encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-    #sample_rate_hertz=16000,
-    language_code="en-US"
-)
+        # NOTE: Not always going to results[0], need to handle multiple results properly
+        data["service_output"].append(response.results[0].alternatives[0].transcript)
 
-response = client.recognize(config=config, audio=audio)
-print(response)
+    # Add in blank column for LLM judge score
+    data["llm_judge_score"] = [0.0 for r in data["id"]]
+
+    # Convert into DataFrame and save to CSV
+    gc_stt_df = pd.DataFrame(data)
+    gc_stt_df.to_csv("service_invocations/results/gc_stt.csv", index=False)
+    return gc_stt_df
