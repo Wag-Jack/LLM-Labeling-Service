@@ -1,3 +1,4 @@
+assemblyai
 datasets
 google-cloud-speech
 google-cloud-storage
@@ -6,3 +7,7 @@ openai
 numpy
 pandas
 python-dotenv
+soundfile
+torch
+torchaudio
+torchcodec
