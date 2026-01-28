@@ -32,14 +32,23 @@ def judge_transcripts(google_cloud, aws_transcribe, assemblyai, edacc_data):
                   Your job is the following:
                   1. Listen to the audio file given.
                   2. Give your textual transcript of the given audio file that you will use to compare each service's output.
-                  3. For each service, give a score (1.0-10.0) on what you believe is the accuracy of each output.
-                  You MUST keep the output within the given parameters and CANNOT deviate from the following format:
+                  3. For each service, give a score (1.0-10.0, scoring in intervals of 0.1) on what you believe is the accuracy of each output.
+                  You MUST return the output as a JSON object in the following format:
                   LLM Transcript: (your transcript)
                   Google Cloud STT: (score from 1.0-10.0)
                   AWS Transcribe: (score from 1.0-10.0)
                   AssemblyAI STT: (score from 1.0-10.0)
-                  - Do NOT give reasons behind each score.
-                  - Do NOT discuss 
+                  You MUST return ONLY valid JSON.
+                  Do not include markdown, code fences, or explanations.
+                  If you violate this, the output will be discarded.
+                  JSON schema:
+                  {{
+                    "llm_transcript": string|null,
+                    "google_cloud": number,
+                    "aws": number,
+                    "assemblyai": number
+                  }}
+                  If you do not receive the WAV file, enter llm_transcript as 'n/a' and the scores as -1.
                   Below are the services' transcript output:
                   {gc}: {gc_transcripts[gc]}
                   {aws}: {aws_transcripts[aws]}
@@ -64,7 +73,8 @@ def judge_transcripts(google_cloud, aws_transcribe, assemblyai, edacc_data):
                     ]
                 }
             ]
-            #response_format={"type": "json_object"}
         )
 
-        print(f"{response.choices[0].message.content}\naudio tokens:{response.usage.prompt_tokens_details.audio_tokens}\ntext tokens:{response.usage.prompt_tokens_details.text_tokens}")
+        llm_output = response.choices[0].message.content
+
+        print(f"{response.choices[0].message.content}")
