@@ -19,5 +19,5 @@ def run_speech_recognition(edacc_df):
     #aai_stt = run_assemblyai(edacc_df)
 
     #judge_transcripts(gc_stt, aws_stt, aai_stt)
-    print()
+    print('--- LLM Judging ---')
     judge_transcripts(None, None, None, edacc_df)

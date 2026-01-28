@@ -1,10 +1,12 @@
 import base64
 from dotenv import load_dotenv
+import json
 from openai import OpenAI
 import os
 import pandas as pd
 from pathlib import Path
 
+load_dotenv()
 
 def judge_transcripts(google_cloud, aws_transcribe, assemblyai, edacc_data):
     # Initiate OpenAI client
@@ -24,7 +26,16 @@ def judge_transcripts(google_cloud, aws_transcribe, assemblyai, edacc_data):
     wav_files = edacc_data['audio'].tolist()
     ids = edacc_data['id'].tolist()
 
-    for wav, gc, aws, aai in zip(wav_files, gc_transcripts.keys(), aws_transcripts.keys(), assemblyai_transcripts.keys()):
+    # Data dictionary for judging output
+    data = {
+        "id": [],
+        "gc_score": [],
+        "aws_score": [],
+        "aai_score": [],
+        "llm_transcript": []
+    }
+
+    for id, wav, gc, aws, aai in zip(ids, wav_files, gc_transcripts.keys(), aws_transcripts.keys(), assemblyai_transcripts.keys()):
         # Set up prompt for the LLM
         prompt = f"""
                   You are acting as a judge for similar web services that are used for speech recognition.
@@ -75,6 +86,30 @@ def judge_transcripts(google_cloud, aws_transcribe, assemblyai, edacc_data):
             ]
         )
 
-        llm_output = response.choices[0].message.content
-
+        # Compile JSON object from LLM output
         print(f"{response.choices[0].message.content}")
+        llm_output = json.loads(response.choices[0].message.content)
+
+        # Append data to resultant data dictionary
+        data['id'].append(f'{id:04d}')
+        data['gc_score'].append(llm_output['google_cloud'])
+        data['aws_score'].append(llm_output['aws'])
+        data['aai_score'].append(llm_output['assemblyai'])
+        data['llm_transcript'].append(llm_output['llm_transcript'])
+
+    # For each service, update their respective score CSVs with LLM judge score
+    google_cloud = google_cloud.drop(columns=['llm_judge_score'])
+    google_cloud['llm_judge_score'] = data['gc_score']
+    google_cloud.to_csv(Path.cwd() / 'service_invocations/results/gc_stt.csv')
+
+    aws_transcribe = aws_transcribe.drop(columns=['llm_judge_score'])
+    aws_transcribe['llm_judge_score'] = data['aws_score']
+    aws_transcribe.to_csv(Path.cwd() / 'service_invocations/results/aws_stt.csv')
+
+    assemblyai = assemblyai.drop(columns=['llm_judge_score'])
+    assemblyai['llm_judge_score'] = data['aai_score']
+    assemblyai.to_csv(Path.cwd() / 'service_invocations/results/aa_stt.csv')
+
+    # Create report for LLM scores
+    judge_results = pd.DataFrame(data)
+    judge_results.to_csv("service_invocations/results/speech_results.csv")
