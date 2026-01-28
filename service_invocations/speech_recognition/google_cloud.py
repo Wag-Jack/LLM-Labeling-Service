@@ -26,7 +26,7 @@ def run_gc_stt(edacc_data):
     for _, row in edacc_data.iterrows():
         # Run the service on the selected file
         audio_file = row["audio"]
-        print(audio_file)
+        print(f"Google Cloud STT: {audio_file}")
         with open(audio_file, 'rb') as f:
             audio_bytes = f.read()
         audio = speech.RecognitionAudio(content=audio_bytes)
@@ -39,10 +39,11 @@ def run_gc_stt(edacc_data):
 
         data["id"].append(f"gc_stt_{row['id']:04d}")
         data["wav_file"].append(row["audio"])
-        print(response, end='\n\n')
-
-        # NOTE: Not always going to results[0], need to handle multiple results properly
-        data["service_output"].append(combine_response(response))
+        
+        formatted_response = combine_response(response)
+        print(formatted_response, end='\n')
+        
+        data["service_output"].append(formatted_response)
 
     # Add in blank column for LLM judge score
     data["llm_judge_score"] = [0.0 for r in data["id"]]

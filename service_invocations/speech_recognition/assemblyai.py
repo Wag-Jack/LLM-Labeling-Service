@@ -20,7 +20,7 @@ def run_assemblyai(edacc_data):
     for _, row in edacc_data.iterrows():
         # Run the service on the selected file
         audio_file = row["audio"]
-        print(audio_file)
+        print(f"AssemblyAI STT: {audio_file}")
 
         # Upload the audio file to AssemblyAI
         transcriber = aai.Transcriber()
@@ -28,7 +28,7 @@ def run_assemblyai(edacc_data):
 
         data["id"].append(f"aa_stt_{row['id']:04d}")
         data["wav_file"].append(row["audio"])
-        print(transcript.text, end='\n\n')
+        print(transcript.text)
 
         data["service_output"].append(transcript.text)
 

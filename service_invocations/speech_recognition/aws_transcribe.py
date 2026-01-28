@@ -58,6 +58,7 @@ def run_aws_transcribe(edacc_data):
         # Run the service on the selected file
         audio_file = row["audio"]
         id = row["id"]
+        print(f"AWS Transcribe STT: {audio_file}")
 
         # Run transcription job and return transcript upon completion
         job = start_transcription_job(id, transcribe)
@@ -66,7 +67,7 @@ def run_aws_transcribe(edacc_data):
 
         data["id"].append(f"aws_stt_{id:04d}")
         data["wav_file"].append(audio_file)
-        print(transcript, end='\n\n')
+        print(transcript, end='\n')
         data["service_output"].append(transcript)
 
     # Add in blank column for LLM judge score
