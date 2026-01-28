@@ -53,8 +53,8 @@ def load_edacc(amount=5, aws=False):
 
     edacc_df = pd.DataFrame(data)
     edacc_df.to_csv(Path.cwd() / "Data" / "EdAcc" / "edacc_metadata.csv", index=False)
-    # WHY DO YOU NOT EXIST ANYMORE?!
 
+    # TODO: Check if requested data already in S3 bucket, if so avoid re-uploading to cut down on time
     if aws:
         s3 = boto3.client('s3',
                           region_name=os.getenv("AWS_REGION"),
