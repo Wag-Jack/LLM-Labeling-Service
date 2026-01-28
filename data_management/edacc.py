@@ -1,10 +1,11 @@
+import boto3
 from datasets import Audio, load_dataset
 import os
 import pandas as pd
 from pathlib import Path
 import soundfile as sf
 
-def load_edacc(amount=5):
+def load_edacc(amount=5, aws=False):
     # Ensure output directory exists
     output_dir = Path.cwd().parent / "Data" / "EdAcc"
     os.makedirs(output_dir, exist_ok=True)
@@ -15,6 +16,7 @@ def load_edacc(amount=5):
         split=f"test[:{amount}]"
     ).cast_column("audio", Audio())
 
+    # Data dictionary to help with DataFrame creation for comprehensive metadata of EdAcc
     data = {
         "id": [],
         "speaker": [],
@@ -50,6 +52,20 @@ def load_edacc(amount=5):
         i += 1
 
     edacc_df = pd.DataFrame(data)
-    edacc_df.to_csv(output_dir / "edacc_metadata.csv", index=False)
+    edacc_df.to_csv(Path.cwd() / "Data" / "EdAcc" / "edacc_metadata.csv", index=False)
+    # WHY DO YOU NOT EXIST ANYMORE?!
+
+    if aws:
+        s3 = boto3.client('s3',
+                          region_name=os.getenv("AWS_REGION"),
+                          aws_access_key_id=os.getenv("AWS_ACCESS_KEY"),
+                          aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")
+                          )
+        bucket_name = os.getenv("AWS_BUCKET")
+        s3_prefix = os.getenv("AWS_S3_PREFIX")
+        
+        for _, row in edacc_df.iterrows():
+            local_file_path = row["audio"]
+            s3.upload_file(local_file_path, bucket_name, f"{s3_prefix}/{row['id']:04d}.wav")
 
     return edacc_df

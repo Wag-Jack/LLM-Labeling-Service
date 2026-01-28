@@ -1,4 +1,5 @@
 assemblyai
+boto3
 datasets
 google-cloud-speech
 google-cloud-storage

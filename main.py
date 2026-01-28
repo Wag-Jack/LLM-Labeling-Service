@@ -16,7 +16,7 @@ def main():
         if 0 <= int(command) < 5:
             match int(command):
                 case 1:
-                    edacc_df = load_edacc(NUM_SAMPLES)
+                    edacc_df = load_edacc(NUM_SAMPLES, True)
                     print(edacc_df.head)
                     run_speech_recognition(edacc_df)
                 case 2:

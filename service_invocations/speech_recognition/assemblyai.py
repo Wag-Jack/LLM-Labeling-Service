@@ -14,7 +14,7 @@ def run_assemblyai(edacc_data):
     data = {
         "id": [],
         "wav_file": [],
-        "service_output": [],
+        "service_output": []
     }
 
     for _, row in edacc_data.iterrows():

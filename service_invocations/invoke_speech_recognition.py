@@ -9,7 +9,7 @@ def run_speech_recognition(edacc_df):
     #gc_stt = run_gc_stt(edacc_df)
 
     # AWS Transcribe
-    #aws_stt = run_aws_transcribe(edacc_df)
+    aws_stt = run_aws_transcribe(edacc_df)
 
     # AssemblyAI Speech-to-Text
-    aai_stt = run_assemblyai(edacc_df)
+    #aai_stt = run_assemblyai(edacc_df)

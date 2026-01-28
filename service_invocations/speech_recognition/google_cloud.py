@@ -30,7 +30,7 @@ def run_gc_stt(edacc_data):
 
         response = client.recognize(config=config, audio=audio)
 
-        data["id"].append(f"gc_tts_{row['id']:04d}")
+        data["id"].append(f"gc_stt_{row['id']:04d}")
         data["wav_file"].append(row["audio"])
         print(response, end='\n\n')
 
