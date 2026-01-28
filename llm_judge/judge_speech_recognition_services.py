@@ -8,6 +8,10 @@ load_dotenv()
 # Initiate OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+def judge_transcripts(google_cloud, aws_transcribe, assemblyai):
+    pass
+
+"""
 interspeech_files = Path('Data/Interspeech2020-Accented-English-Speech-Recognition-Competition-Data')
 interspeech_wavs = list(interspeech_files.rglob('*.wav'))
 
@@ -29,3 +33,4 @@ for wav in interspeech_wavs:
     )
 
     print(analysis.output_text)
+"""
