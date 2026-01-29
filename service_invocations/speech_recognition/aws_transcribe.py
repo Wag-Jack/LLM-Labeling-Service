@@ -4,14 +4,16 @@ import os
 import pandas as pd
 from pathlib import Path
 import requests
+from time import time
 
 load_dotenv()
 
 S3_URI = "s3://llm-as-a-judge-edacc-storage"
 
 # Start the transcription job for specific audio files
+# Exceptions for job handling: botocore.errorfactory.ConflictException -> job already running, run while loop until job cancelled
 def start_transcription_job(id, transcribe):
-    transcript_job_name = f"{id:04d}_job"
+    transcript_job_name = f"{id:04d}_job-{int(time())}"
     response = transcribe.start_transcription_job(
         TranscriptionJobName=transcript_job_name,
         Media={"MediaFileUri": f"{S3_URI}/edacc/audio/{id:04d}.wav"},
@@ -30,14 +32,17 @@ def wait_for_job(job_name, transcribe):
             uri = response['TranscriptionJob']['Transcript']['TranscriptFileUri']
             transcribe.delete_transcription_job(TranscriptionJobName=job_name)
             return uri
-        elif status != 'IN_PROGRESS':
+        elif status == 'FAILED':
             return None
         
 # Method to extract the transcript from job's resulting URI
 def retrieve_transcript(transcirpt_uri):
-    response = requests.get(transcirpt_uri).json()
-    transcript = response['results']['transcripts'][0]['transcript']
-    return transcript
+    if transcirpt_uri == None:
+        return ''
+    else:
+        response = requests.get(transcirpt_uri).json()
+        transcript = response['results']['transcripts'][0]['transcript']
+        return transcript
 
 def run_aws_transcribe(edacc_data):
     # Initialize AWS clients to Transcribe
