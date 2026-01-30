@@ -1,5 +1,7 @@
 from service_invocations.invoke_speech_recognition import run_speech_recognition
+from service_invocations.invoke_language_translation import run_language_translation
 from data_management.edacc import load_edacc
+from data_management.en_fr import load_en_fr
 
 # Amount of samples from each dataset to run through services
 NUM_SAMPLES = 50
@@ -9,7 +11,7 @@ def main():
         command = input("LLM as a Judge\n" \
                         "1.) Speech Recognition\n" \
                         "2.) Emotion Detection\n" \
-                        "3.) Language Transltion\n" \
+                        "3.) Language Translation\n" \
                         "4.) Exit\n" \
                         "Select: ")
         
@@ -22,6 +24,9 @@ def main():
                 case 2:
                     pass
                 case 3:
+                    print("---  Retrieving EuroParl data pairs ---")
+                    europarl_df = load_en_fr(NUM_SAMPLES)
+                    run_language_translation(europarl_df)
                     pass
                 case 4:
                     break

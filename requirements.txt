@@ -2,10 +2,10 @@ assemblyai
 boto3
 datasets
 google-cloud-speech
-google-cloud-storage
+google-cloud-translate
 huggingface-hub
-openai
 numpy
+openai
 pandas
 python-dotenv
 soundfile
