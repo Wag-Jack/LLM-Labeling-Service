@@ -4,7 +4,7 @@ from html import unescape
 import pandas as pd
 from pathlib import Path
 
-def run_gc_translation(en_fr_data):
+def run_gc_translation(europarl_data):
     # Grab secret key from credentials to tap into Google Cloud Translation
     cred_path = Path.cwd() / 'credentials'
     client_file = cred_path / 'speech_recognition/llm-as-a-judge_gc.json'
@@ -18,8 +18,8 @@ def run_gc_translation(en_fr_data):
         "service_output": []
     }
 
-    for _, row in en_fr_data.iterrows():
-        # Run the service on the selected file
+    for _, row in europarl_data.iterrows():
+        # Run the service on the selected text
         id, english = row["id"], row["english"]
         print(f"Google Cloud Translate: ({id:04d}) {english}")
 

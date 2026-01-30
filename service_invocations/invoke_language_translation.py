@@ -10,11 +10,11 @@ def run_language_translation(europarl_df):
 
     # AWS Translate
     print('--- AWS Translate ---')
-    aws_trans = run_aws_translation(europarl_df)
+    #aws_trans = run_aws_translation(europarl_df)
 
     # Microsoft Translator
     print('--- Microsoft Translator ---')
-    #micro_trans = run_micro_translation(europarl_df)
+    micro_trans = run_micro_translation(europarl_df)
     
     # LLM Judging of translation services
     print('--- LLM Judging ---')
