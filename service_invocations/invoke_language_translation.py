@@ -6,7 +6,7 @@ from service_invocations.language_translation.microsoft_translator import run_mi
 def run_language_translation(europarl_df):
     # Google Cloud Translation
     print('--- Google Cloud Translation ---')
-    gc_trans = run_gc_translation(europarl_df)
+    #gc_trans = run_gc_translation(europarl_df)
 
     # AWS Translate
     print('--- AWS Translate ---')
