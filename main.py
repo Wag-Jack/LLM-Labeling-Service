@@ -4,7 +4,7 @@ from data_management.edacc import load_edacc
 from data_management.en_fr import load_en_fr
 
 # Amount of samples from each dataset to run through services
-NUM_SAMPLES = 50
+NUM_SAMPLES = 10
 
 def main():
     while True:

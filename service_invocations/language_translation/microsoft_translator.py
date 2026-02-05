@@ -46,6 +46,7 @@ def run_micro_translation(europarl_data):
         response = request.json()
         request = json.dumps(response, sort_keys=True, ensure_ascii=False, indent=4, separators=(',', ': '))
         french = response[0]["translations"][0]["text"]
+        print(french)
 
         data["id"].append(f'ms_trans_{id:04d}')
         data["english_input"].append(english)
@@ -57,3 +58,5 @@ def run_micro_translation(europarl_data):
     # Convert into DataFrame and save to CSV
     ms_trans_df = pd.DataFrame(data)
     ms_trans_df.to_csv("service_invocations/results/ms_trans.csv", index=False)
+
+    return ms_trans_df

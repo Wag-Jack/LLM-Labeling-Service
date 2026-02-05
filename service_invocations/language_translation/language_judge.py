@@ -30,7 +30,7 @@ def judge_translations(google_cloud, aws_translate, microsoft_translate, europar
     }
 
     for id, eng, gc, aws, ms in zip(ids, english_input, gc_french.keys(), aws_french.keys(), ms_french.keys()):
-        print(f"LLM Judging: {eng}")
+        print(f"LLM Judging: ({id:04d}) {eng}")
 
         # Set up prompt for the LLM
         prompt = f"""
@@ -92,10 +92,14 @@ def judge_translations(google_cloud, aws_translate, microsoft_translate, europar
     google_cloud['llm_judge_score'] = data['gc_score']
     google_cloud.to_csv(Path.cwd() / 'service_invocations/results/gc_trans.csv', index=False)
 
-    aws_transcribe = aws_transcribe.drop(columns=['llm_judge_score'])
-    aws_transcribe['llm_judge_score'] = data['aws_score']
-    aws_transcribe.to_csv(Path.cwd() / 'service_invocations/results/aws_trans.csv', index=False)
+    aws_translate = aws_translate.drop(columns=['llm_judge_score'])
+    aws_translate['llm_judge_score'] = data['aws_score']
+    aws_translate.to_csv(Path.cwd() / 'service_invocations/results/aws_trans.csv', index=False)
 
     microsoft_translate = microsoft_translate.drop(columns=['llm_judge_score'])
     microsoft_translate['llm_judge_score'] = data['ms_score']
     microsoft_translate.to_csv(Path.cwd() / 'service_invocations/results/ms_trans.csv', index=False)
+
+    # Create report for LLM scores
+    judge_results = pd.DataFrame(data)
+    judge_results.to_csv("service_invocations/results/language_results.csv", index=False)

@@ -6,11 +6,11 @@ from service_invocations.language_translation.microsoft_translator import run_mi
 def run_language_translation(europarl_df):
     # Google Cloud Translation
     print('--- Google Cloud Translation ---')
-    #gc_trans = run_gc_translation(europarl_df)
+    gc_trans = run_gc_translation(europarl_df)
 
     # AWS Translate
     print('--- AWS Translate ---')
-    #aws_trans = run_aws_translation(europarl_df)
+    aws_trans = run_aws_translation(europarl_df)
 
     # Microsoft Translator
     print('--- Microsoft Translator ---')
@@ -18,4 +18,4 @@ def run_language_translation(europarl_df):
     
     # LLM Judging of translation services
     print('--- LLM Judging ---')
-    #judge_translations(gc_trans, aws_translate, micro_trans, europarl_df)
+    judge_translations(gc_trans, aws_trans, micro_trans, europarl_df)
