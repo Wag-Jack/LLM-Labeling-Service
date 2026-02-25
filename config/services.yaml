@@ -1,0 +1,46 @@
+service_registry:
+  gc_stt:
+    provider: google
+    task: stt
+    runner: service_invocations.speech_recognition.google_cloud:run_gc_stt
+    results_file: gc_stt.csv
+  aws_stt:
+    provider: aws
+    task: stt
+    runner: service_invocations.speech_recognition.aws_transcribe:run_aws_transcribe
+    results_file: aws_stt.csv
+  assemblyai_stt:
+    provider: assemblyai
+    task: stt
+    runner: service_invocations.speech_recognition.assemblyai:run_assemblyai
+    results_file: aa_stt.csv
+
+service_sets:
+  speech_transcription:
+    - name: gc_stt
+      enabled: true
+    - name: aws_stt
+      enabled: true
+    - name: assemblyai_stt
+      enabled: true
+  language_translation:
+    - name: gc_translation
+      provider: google
+      task: translation
+      enabled: true
+    - name: aws_translation
+      provider: aws
+      task: translation
+      enabled: true
+    - name: azure_translation
+      provider: azure
+      task: translation
+      enabled: true
+
+runtime:
+  max_concurrency: 6
+  retries: 2
+  timeout_s: 60
+
+metrics:
+  output_path: service_invocations/results/metrics.csv

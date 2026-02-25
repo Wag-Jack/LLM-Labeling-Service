@@ -7,6 +7,7 @@ huggingface-hub
 numpy
 openai
 pandas
+PyYAML
 python-dotenv
 soundfile
 torch

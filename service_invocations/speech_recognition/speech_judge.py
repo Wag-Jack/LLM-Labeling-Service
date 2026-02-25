@@ -8,14 +8,57 @@ from pathlib import Path
 
 load_dotenv()
 
-def judge_transcripts(google_cloud, aws_transcribe, assemblyai, edacc_data):
+from registry.speech_recognition import load_service_registry
+
+
+def _normalize_id(value) -> str:
+    if isinstance(value, (int, float)) and float(value).is_integer():
+        return f"{int(value):04d}"
+    return str(value)
+
+
+def _load_results_for_service(results_dir: Path, results_file: str) -> pd.DataFrame:
+    return pd.read_csv(results_dir / results_file)
+
+
+def judge_transcripts(results_by_service, edacc_data, use_existing=False,
+                      results_dir=None, config_path: Path | None = None):
+    if results_dir is None:
+        results_dir = Path.cwd() / "service_invocations" / "results"
+
+    service_registry = load_service_registry(config_path)
+    active_services = {
+        name: entry
+        for name, entry in service_registry.items()
+        if entry.get("task") == "stt"
+    }
+    if results_by_service:
+        active_services = {
+            name: entry
+            for name, entry in active_services.items()
+            if name in results_by_service
+        }
+    if not active_services:
+        raise ValueError("No speech services found in service_registry.")
+
+    if use_existing:
+        results_by_service = {
+            name: _load_results_for_service(results_dir, entry["results_file"])
+            for name, entry in active_services.items()
+        }
+    if not results_by_service:
+        raise ValueError("No speech results provided for judging.")
+
     # Initiate OpenAI client
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
     # Read each service's dataframe for its id and transcript
-    gc_transcripts = dict(zip(google_cloud['id'], google_cloud['service_output']))
-    aws_transcripts = dict(zip(aws_transcribe['id'], aws_transcribe['service_output']))
-    assemblyai_transcripts = dict(zip(assemblyai['id'], assemblyai['service_output']))
+    transcripts_by_service = {}
+    for name, df in results_by_service.items():
+        if "id" not in df.columns or "service_output" not in df.columns:
+            raise ValueError(f"Missing required columns for {name}.")
+        normalized = dict(zip(df["id"].map(_normalize_id), df["service_output"]))
+        transcripts_by_service[name] = normalized
 
     # Open metadata of EdAcc and retrieve all the audio paths as a list
     wav_files = edacc_data['audio'].tolist()
@@ -24,15 +67,19 @@ def judge_transcripts(google_cloud, aws_transcribe, assemblyai, edacc_data):
     # Data dictionary for judging output
     data = {
         "id": [],
-        "gc_score": [],
-        "aws_score": [],
-        "aai_score": [],
+        "scores": [],
         "llm_transcript": []
     }
 
-    for id, wav, gc, aws, aai in zip(ids, wav_files, gc_transcripts.keys(), aws_transcripts.keys(), assemblyai_transcripts.keys()):
+    for id, wav in zip(ids, wav_files):
+        id_key = _normalize_id(id)
         print(f"LLM Judging: {wav}")
-        
+
+        service_blocks = []
+        for name, transcripts in transcripts_by_service.items():
+            transcript = transcripts.get(id_key, "")
+            service_blocks.append(f"{name}: {transcript}")
+
         # Set up prompt for the LLM
         prompt = f"""
                   You are acting as a judge for similar web services that are used for speech recognition.
@@ -41,27 +88,20 @@ def judge_transcripts(google_cloud, aws_transcribe, assemblyai, edacc_data):
                   1. Listen to the audio file given.
                   2. Give your textual transcript of the given audio file that you will use to compare each service's output.
                   3. For each service, give a score (1.0-10.0, scoring in intervals of 0.1) on what you believe is the accuracy of each output.
-                  You MUST return the output as a JSON object in the following format:
-                  LLM Transcript: (your transcript)
-                  Google Cloud STT: (score from 1.0-10.0)
-                  AWS Transcribe: (score from 1.0-10.0)
-                  AssemblyAI STT: (score from 1.0-10.0)
                   You MUST return ONLY valid JSON. 
                   Do not include markdown, code fences, or explanations.
                   If you violate this, the output will be discarded.
                   JSON schema:
                   {{
                     "llm_transcript": string|null,
-                    "google_cloud": number,
-                    "aws": number,
-                    "assemblyai": number
+                    "scores": {{
+                      "<service_name>": number
+                    }}
                   }}
                   If you do not receive the WAV file, enter llm_transcript as 'n/a' and the scores as -1.
                   Do NOT mention that you need the WAV file, only give the JSON schema output.
                   Below are the services' transcript output:
-                  {gc}: {gc_transcripts[gc]}
-                  {aws}: {aws_transcripts[aws]}
-                  {aai}: {assemblyai_transcripts[aai]}
+                  {'\n'.join(service_blocks)}
                   """
         
         # Open designated audio file
@@ -86,28 +126,38 @@ def judge_transcripts(google_cloud, aws_transcribe, assemblyai, edacc_data):
 
         # Compile JSON object from LLM output
         print(f"{response.choices[0].message.content}")
-        llm_output = json.loads(response.choices[0].message.content)
+        default_scores = {name: -1 for name in transcripts_by_service.keys()}
+        try:
+            llm_output = json.loads(response.choices[0].message.content)
+            scores = llm_output.get('scores', {}) if isinstance(llm_output, dict) else {}
+        except json.JSONDecodeError:
+            llm_output = {"llm_transcript": "n/a"}
+            scores = {}
 
         # Append data to resultant data dictionary
-        data['id'].append(f'{id:04d}')
-        data['gc_score'].append(llm_output['google_cloud'])
-        data['aws_score'].append(llm_output['aws'])
-        data['aai_score'].append(llm_output['assemblyai'])
-        data['llm_transcript'].append(llm_output['llm_transcript'])
+        data['id'].append(id_key)
+        data['scores'].append({**default_scores, **scores})
+        data['llm_transcript'].append(llm_output.get('llm_transcript', "n/a"))
 
     # For each service, update their respective score CSVs with LLM judge score
-    google_cloud = google_cloud.drop(columns=['llm_judge_score'])
-    google_cloud['llm_judge_score'] = data['gc_score']
-    google_cloud.to_csv(Path.cwd() / 'service_invocations/results/gc_stt.csv', index=False)
+    scores_by_service = {}
+    for id_key, score_map in zip(data["id"], data["scores"]):
+        for name, score in score_map.items():
+            scores_by_service.setdefault(name, {})[id_key] = score
 
-    aws_transcribe = aws_transcribe.drop(columns=['llm_judge_score'])
-    aws_transcribe['llm_judge_score'] = data['aws_score']
-    aws_transcribe.to_csv(Path.cwd() / 'service_invocations/results/aws_stt.csv', index=False)
-
-    assemblyai = assemblyai.drop(columns=['llm_judge_score'])
-    assemblyai['llm_judge_score'] = data['aai_score']
-    assemblyai.to_csv(Path.cwd() / 'service_invocations/results/aa_stt.csv', index=False)
+    for name, df in results_by_service.items():
+        score_map = scores_by_service.get(name, {})
+        df = df.drop(columns=["llm_judge_score"], errors="ignore")
+        df["llm_judge_score"] = df["id"].map(_normalize_id).map(score_map).fillna(-1)
+        results_file = active_services.get(name, {}).get("results_file")
+        if not results_file:
+            continue
+        df.to_csv(results_dir / results_file, index=False)
 
     # Create report for LLM scores
-    judge_results = pd.DataFrame(data)
-    judge_results.to_csv("service_invocations/results/speech_results.csv", index=False)
+    judge_results = pd.DataFrame({
+        "id": data["id"],
+        "llm_transcript": data["llm_transcript"],
+        "scores": data["scores"],
+    })
+    judge_results.to_csv(results_dir / "speech_results.csv", index=False)
