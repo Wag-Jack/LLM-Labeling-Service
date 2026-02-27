@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 import os
 import pandas as pd
 from pathlib import Path
+import time
 
 load_dotenv()
 
@@ -17,7 +18,8 @@ def run_assemblyai(edacc_data):
     data = {
         "id": [],
         "wav_file": [],
-        "service_output": []
+        "service_output": [],
+        "latency_ms": [],
     }
 
     for _, row in edacc_data.iterrows():
@@ -27,10 +29,13 @@ def run_assemblyai(edacc_data):
 
         # Upload the audio file to AssemblyAI
         transcriber = aai.Transcriber()
+        start_time = time.perf_counter()
         transcript = transcriber.transcribe(audio_file)
+        latency_ms = (time.perf_counter() - start_time) * 1000.0
 
         data["id"].append(f"aa_stt_{row['id']:04d}")
         data["wav_file"].append(row["audio"])
+        data["latency_ms"].append(round(latency_ms, 2))
         print(transcript.text)
 
         data["service_output"].append(transcript.text)

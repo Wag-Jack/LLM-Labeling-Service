@@ -4,7 +4,7 @@ chat_multimodal_v1:
       task: chat
       model: gpt-4o
       modalities: ["text", "audio", "image"]
-      enabled: true
+      enabled: false
     - name: gemini_1_5_pro
       provider: gemini
       task: chat

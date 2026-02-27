@@ -5,6 +5,7 @@ import pandas as pd
 from pathlib import Path
 import requests
 from time import time
+import time as perf_time
 
 load_dotenv()
 
@@ -59,7 +60,8 @@ def run_aws_transcribe(edacc_data):
     data = {
         "id": [],
         "wav_file": [],
-        "service_output": []
+        "service_output": [],
+        "latency_ms": [],
     }
 
     for _, row in edacc_data.iterrows():
@@ -69,12 +71,15 @@ def run_aws_transcribe(edacc_data):
         print(f"AWS Transcribe STT: {audio_file}")
 
         # Run transcription job and return transcript upon completion
+        start_time = perf_time.perf_counter()
         job = start_transcription_job(id, transcribe)
         response_uri = wait_for_job(job, transcribe)
         transcript = retrieve_transcript(response_uri)
+        latency_ms = (perf_time.perf_counter() - start_time) * 1000.0
 
         data["id"].append(f"aws_stt_{id:04d}")
         data["wav_file"].append(audio_file)
+        data["latency_ms"].append(round(latency_ms, 2))
         print(transcript, end='\n')
         data["service_output"].append(transcript)
 

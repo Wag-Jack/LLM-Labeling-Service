@@ -3,6 +3,7 @@ import os
 import pandas as pd
 from pathlib import Path
 import requests
+import time
 
 load_dotenv()
 
@@ -27,6 +28,7 @@ def run_deepgram_stt(edacc_data):
         "id": [],
         "wav_file": [],
         "service_output": [],
+        "latency_ms": [],
     }
 
     for _, row in edacc_data.iterrows():
@@ -35,6 +37,7 @@ def run_deepgram_stt(edacc_data):
         print(f"Deepgram STT: {audio_file}")
 
         # Provide a file path URL if available, otherwise fall back to file upload.
+        start_time = time.perf_counter()
         if isinstance(audio_file, str) and audio_file.startswith(("http://", "https://")):
             payload = {"url": audio_file}
             response = requests.post(url, json=payload, headers=headers, timeout=60)
@@ -46,6 +49,7 @@ def run_deepgram_stt(edacc_data):
                     data=f,
                     timeout=120,
                 )
+        latency_ms = (time.perf_counter() - start_time) * 1000.0
 
         response.raise_for_status()
         result = response.json()
@@ -59,6 +63,7 @@ def run_deepgram_stt(edacc_data):
         data["id"].append(f"deepgram_stt_{sample_id:04d}")
         data["wav_file"].append(audio_file)
         data["service_output"].append(transcript)
+        data["latency_ms"].append(round(latency_ms, 2))
         print(transcript)
 
     data["llm_judge_score"] = [0.0 for _ in data["id"]]

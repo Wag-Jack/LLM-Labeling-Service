@@ -4,6 +4,7 @@ from ibm_watson import SpeechToTextV1
 import os
 import pandas as pd
 from pathlib import Path
+import time
 
 load_dotenv()
 
@@ -40,6 +41,7 @@ def run_ibm_watson_stt(edacc_data, results_path: Path | None = None):
         "id": [],
         "wav_file": [],
         "service_output": [],
+        "latency_ms": [],
     }
 
     for _, row in edacc_data.iterrows():
@@ -50,16 +52,19 @@ def run_ibm_watson_stt(edacc_data, results_path: Path | None = None):
         with open(audio_file, "rb") as f:
             audio_bytes = f.read()
 
+        start_time = time.perf_counter()
         response = stt.recognize(
             audio=audio_bytes,
             content_type="audio/wav",
             model="en-US_BroadbandModel",
         ).get_result()
+        latency_ms = (time.perf_counter() - start_time) * 1000.0
 
         transcript = _extract_transcript(response)
         data["id"].append(f"ibm_stt_{sample_id:04d}")
         data["wav_file"].append(audio_file)
         data["service_output"].append(transcript)
+        data["latency_ms"].append(round(latency_ms, 2))
         print(transcript)
 
     data["llm_judge_score"] = [0.0 for _ in data["id"]]

@@ -6,6 +6,7 @@ import os
 import pandas as pd
 from pathlib import Path
 import re
+import time
 
 load_dotenv()
 
@@ -101,7 +102,10 @@ def generate_oracle_transcripts(edacc_data, use_existing=False, results_path=Non
 
         data = {
             "id": [],
-            "llm_oracle": []
+            "llm_oracle": [],
+            "latency_ms": [],
+            "input_tokens": [],
+            "output_tokens": []
         }
 
         for sample_id, wav in zip(ids, wav_files):
@@ -125,6 +129,7 @@ def generate_oracle_transcripts(edacc_data, use_existing=False, results_path=Non
 
             audio = base64.b64encode(audio_bytes).decode("utf-8")
 
+            start_time = time.perf_counter()
             response = client.chat.completions.create(
                 model=model_id,
                 modalities=['text'],
@@ -138,6 +143,16 @@ def generate_oracle_transcripts(edacc_data, use_existing=False, results_path=Non
                     }
                 ]
             )
+            latency_ms = (time.perf_counter() - start_time) * 1000.0
+            usage = getattr(response, "usage", None)
+            input_tokens = getattr(usage, "input_tokens", None)
+            output_tokens = getattr(usage, "output_tokens", None)
+            prompt_tokens = getattr(usage, "prompt_tokens", None)
+            completion_tokens = getattr(usage, "completion_tokens", None)
+            if input_tokens is None:
+                input_tokens = prompt_tokens
+            if output_tokens is None:
+                output_tokens = completion_tokens
 
             # Compile JSON object from LLM output
             print(f"{response.choices[0].message.content}")
@@ -149,6 +164,9 @@ def generate_oracle_transcripts(edacc_data, use_existing=False, results_path=Non
             # Append data to resultant data dictionary
             data['id'].append(_normalize_id(sample_id))
             data['llm_oracle'].append(llm_output.get('llm_oracle', "n/a"))
+            data['latency_ms'].append(round(latency_ms, 2))
+            data['input_tokens'].append(input_tokens)
+            data['output_tokens'].append(output_tokens)
 
         oracle_results = pd.DataFrame(data)
         oracle_results.to_csv(model_results_path, index=False)

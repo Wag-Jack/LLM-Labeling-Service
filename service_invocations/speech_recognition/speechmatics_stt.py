@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 import os
 import pandas as pd
 from pathlib import Path
+import time
 
 from speechmatics.batch import AsyncClient, JobConfig, JobType, TranscriptionConfig
 
@@ -21,20 +22,22 @@ def _extract_transcript(result) -> str:
     return ""
 
 
-async def _transcribe_all(edacc_data) -> list[str]:
+async def _transcribe_all(edacc_data) -> list[tuple[str, float]]:
     config = JobConfig(
         type=JobType.TRANSCRIPTION,
         transcription_config=TranscriptionConfig(language="en"),
     )
 
-    transcripts: list[str] = []
+    transcripts: list[tuple[str, float]] = []
     async with AsyncClient() as client:
         for _, row in edacc_data.iterrows():
             audio_file = row["audio"]
             print(f"Speechmatics STT: {audio_file}")
+            start_time = time.perf_counter()
             result = await client.transcribe(audio_file, config=config)
+            latency_ms = (time.perf_counter() - start_time) * 1000.0
             transcript = _extract_transcript(result)
-            transcripts.append(transcript)
+            transcripts.append((transcript, latency_ms))
             print(transcript)
     return transcripts
 
@@ -54,14 +57,16 @@ def run_speechmatics_stt(edacc_data, results_path: Path | None = None):
         "id": [],
         "wav_file": [],
         "service_output": [],
+        "latency_ms": [],
     }
 
-    for (_, row), transcript in zip(edacc_data.iterrows(), transcripts):
+    for (_, row), (transcript, latency_ms) in zip(edacc_data.iterrows(), transcripts):
         sample_id = row["id"]
         audio_file = row["audio"]
         data["id"].append(f"speechmatics_stt_{sample_id:04d}")
         data["wav_file"].append(audio_file)
         data["service_output"].append(transcript)
+        data["latency_ms"].append(round(latency_ms, 2))
 
     data["llm_judge_score"] = [0.0 for _ in data["id"]]
 

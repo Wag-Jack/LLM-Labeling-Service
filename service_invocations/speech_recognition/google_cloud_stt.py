@@ -2,6 +2,7 @@ from google.oauth2 import service_account
 from google.cloud import speech
 import pandas as pd
 from pathlib import Path
+import time
 
 # Results folder organized by task.
 _RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition"  # Task-scoped outputs.
@@ -25,6 +26,7 @@ def run_gc_stt(edacc_data):
         "id": [],
         "wav_file": [],
         "service_output": [],
+        "latency_ms": [],
     }
 
     for _, row in edacc_data.iterrows():
@@ -39,10 +41,13 @@ def run_gc_stt(edacc_data):
             language_code="en-US"
         )
 
+        start_time = time.perf_counter()
         response = client.recognize(config=config, audio=audio)
+        latency_ms = (time.perf_counter() - start_time) * 1000.0
 
         data["id"].append(f"gc_stt_{row['id']:04d}")
         data["wav_file"].append(row["audio"])
+        data["latency_ms"].append(round(latency_ms, 2))
         
         formatted_response = combine_response(response)
         print(formatted_response, end='\n')

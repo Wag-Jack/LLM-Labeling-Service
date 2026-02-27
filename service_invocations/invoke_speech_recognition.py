@@ -45,19 +45,18 @@ def run_speech_recognition(edacc_df, use_existing=False,
     results_dir = Path.cwd() / "service_invocations" / "results" / "speech_recognition"
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    # LLMaaS
+    print('--- LLMaaS ---')
+
+    # Run LLM oracle transcripts; split outputs by model if model_set_name is provided.
+    oracle_results = generate_oracle_transcripts(
+        edacc_df,
+        use_existing=use_existing,
+        results_dir=results_dir,
+        model_entries=model_entries,
+        return_by_model=model_entries is not None,
+    )
+
     if results:
-        print('--- LLMaaS ---')
-
-        # Run LLM oracle transcripts; split outputs by model if model_set_name is provided.
-        oracle_results = generate_oracle_transcripts(
-            edacc_df,
-            use_existing=use_existing,
-            results_dir=results_dir,
-            model_entries=model_entries,
-            return_by_model=model_entries is not None,
-        )
-
         print('--- WER ---')
         # WER outputs are per-model when multiple models are used.
         if isinstance(oracle_results, dict):
@@ -72,6 +71,8 @@ def run_speech_recognition(edacc_df, use_existing=False,
             wer_counts.to_csv(results_dir / "wer_counts.csv", index=False)
             wer_summary = compute_wer_summary(wer_counts, list(results.keys()))
             wer_summary.to_csv(results_dir / "wer_summary.csv", index=False)
+    else:
+        print("--- Skipping WER (no speech service results) ---")
 
     """
     if results:
