@@ -75,7 +75,9 @@ def run_speech_services(edacc_df, service_set: Iterable[dict], use_existing: boo
                         service_registry: Dict[str, Dict[str, Any]] | None = None,
                         ) -> Dict[str, pd.DataFrame]:
     if results_dir is None:
-        results_dir = Path.cwd() / "service_invocations" / "results"
+        results_dir = Path.cwd() / "service_invocations" / "results" / "speech_recognition"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    # Service results are stored under a task-scoped folder.
     if service_registry is None:
         service_registry = _load_service_registry(config_path)
 

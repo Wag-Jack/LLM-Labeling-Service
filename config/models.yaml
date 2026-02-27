@@ -11,6 +11,7 @@ chat_multimodal_v1:
       model: gemini-1.5-pro
       modalities: ["text", "audio", "image"]
       enabled: false
+
 models:
   gpt_4o:
     provider: openai

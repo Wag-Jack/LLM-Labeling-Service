@@ -8,7 +8,10 @@ import uuid
 
 load_dotenv()
 
+_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "language_translation"  # Task-scoped outputs.
+
 def run_micro_translation(europarl_data):
+    _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     # Establish connection to Microsoft Translator
     key = os.getenv("MICROSOFT_ACCESS_KEY")
     endpoint = "https://api.cognitive.microsofttranslator.com"
@@ -56,4 +59,4 @@ def run_micro_translation(europarl_data):
 
     # Convert into DataFrame and save to CSV
     ms_trans_df = pd.DataFrame(data)
-    ms_trans_df.to_csv("service_invocations/results/ms_trans.csv", index=False)
+    ms_trans_df.to_csv(_RESULTS_DIR / "ms_trans.csv", index=False)

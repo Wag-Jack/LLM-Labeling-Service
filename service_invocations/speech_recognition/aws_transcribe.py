@@ -8,6 +8,8 @@ from time import time
 
 load_dotenv()
 
+_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition"  # Task-scoped outputs.
+
 S3_URI = "s3://llm-as-a-judge-edacc-storage"
 
 # Start the transcription job for specific audio files
@@ -45,6 +47,7 @@ def retrieve_transcript(transcirpt_uri):
         return transcript
 
 def run_aws_transcribe(edacc_data):
+    _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     # Initialize AWS clients to Transcribe
     transcribe = boto3.client('transcribe',
                               region_name=os.getenv("AWS_REGION"),
@@ -80,5 +83,5 @@ def run_aws_transcribe(edacc_data):
 
     # Convert into DataFrame and save to CSV
     aws_stt_df = pd.DataFrame(data)
-    aws_stt_df.to_csv("service_invocations/results/aws_stt.csv", index=False)
+    aws_stt_df.to_csv(_RESULTS_DIR / "aws_stt.csv", index=False)
     return aws_stt_df

@@ -3,6 +3,9 @@ from google.cloud import speech
 import pandas as pd
 from pathlib import Path
 
+# Results folder organized by task.
+_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition"  # Task-scoped outputs.
+
 # Helper function to deal with multiple transcript results from service
 def combine_response(response_json):
     combined_transcript = ""
@@ -11,6 +14,7 @@ def combine_response(response_json):
     return combined_transcript.strip()
 
 def run_gc_stt(edacc_data):
+    _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     # Grab secret key from credentials to tap into Google Cloud Speech-to-Text API
     cred_path = Path.cwd() / 'credentials'
     client_file = cred_path / 'speech_recognition/llm-as-a-judge_gc.json'
@@ -50,5 +54,5 @@ def run_gc_stt(edacc_data):
 
     # Convert into DataFrame and save to CSV
     gc_stt_df = pd.DataFrame(data)
-    gc_stt_df.to_csv("service_invocations/results/gc_stt.csv", index=False)
+    gc_stt_df.to_csv(_RESULTS_DIR / "gc_stt.csv", index=False)
     return gc_stt_df

@@ -2,7 +2,7 @@ service_registry:
   gc_stt:
     provider: google
     task: stt
-    runner: service_invocations.speech_recognition.google_cloud:run_gc_stt
+    runner: service_invocations.speech_recognition.google_cloud_stt:run_gc_stt
     results_file: gc_stt.csv
   aws_stt:
     provider: aws
@@ -14,6 +14,21 @@ service_registry:
     task: stt
     runner: service_invocations.speech_recognition.assemblyai:run_assemblyai
     results_file: aa_stt.csv
+  ibm_watson_stt:
+    provider: ibm
+    task: stt
+    runner: service_invocations.speech_recognition.ibm_watson_stt:run_ibm_watson_stt
+    results_file: ibm_stt.csv
+  speechmatics_stt:
+    provider: speechmatics
+    task: stt
+    runner: service_invocations.speech_recognition.speechmatics_stt:run_speechmatics_stt
+    results_file: speechmatics_stt.csv
+  deepgram_stt:
+    provider: deepgram
+    task: stt
+    runner: service_invocations.speech_recognition.deepgram_stt:run_deepgram_stt
+    results_file: deepgram_stt.csv
 
 service_sets:
   speech_transcription:
@@ -22,6 +37,12 @@ service_sets:
     - name: aws_stt
       enabled: true
     - name: assemblyai_stt
+      enabled: true
+    - name: ibm_watson_stt
+      enabled: true
+    - name: speechmatics_stt
+      enabled: true
+    - name: deepgram_stt
       enabled: true
   language_translation:
     - name: gc_translation

@@ -1,14 +1,17 @@
 assemblyai
 boto3
 datasets
+deepgram-sdk
 google-cloud-speech
 google-cloud-translate
 huggingface-hub
+ibm-watson
 numpy
 openai
 pandas
 PyYAML
 python-dotenv
+speechmatics-batch
 soundfile
 torch
 torchaudio

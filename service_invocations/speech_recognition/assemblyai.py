@@ -6,7 +6,10 @@ from pathlib import Path
 
 load_dotenv()
 
+_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition"  # Task-scoped outputs.
+
 def run_assemblyai(edacc_data):
+    _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     # Establish connection with AsssemblyAI API
     aai.settings.api_key = os.getenv("ASSEMBLYAI_API_KEY")
 
@@ -37,5 +40,5 @@ def run_assemblyai(edacc_data):
 
     # Convert into DataFrame and save to CSV
     aa_stt_df = pd.DataFrame(data)
-    aa_stt_df.to_csv("service_invocations/results/aa_stt.csv", index=False)
+    aa_stt_df.to_csv(_RESULTS_DIR / "aa_stt.csv", index=False)
     return aa_stt_df

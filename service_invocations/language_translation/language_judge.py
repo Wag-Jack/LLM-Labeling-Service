@@ -7,7 +7,10 @@ from pathlib import Path
 
 load_dotenv
 
+_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "language_translation"  # Task-scoped outputs.
+
 def judge_translations(google_cloud, aws_translate, microsoft_translate, europarl_data):
+    _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     # Initiate OpenAI client
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -90,12 +93,12 @@ def judge_translations(google_cloud, aws_translate, microsoft_translate, europar
     # For each service, update their respective score CSVs with LLM judge score
     google_cloud = google_cloud.drop(columns=['llm_judge_score'])
     google_cloud['llm_judge_score'] = data['gc_score']
-    google_cloud.to_csv(Path.cwd() / 'service_invocations/results/gc_trans.csv', index=False)
+    google_cloud.to_csv(_RESULTS_DIR / "gc_trans.csv", index=False)
 
     aws_transcribe = aws_transcribe.drop(columns=['llm_judge_score'])
     aws_transcribe['llm_judge_score'] = data['aws_score']
-    aws_transcribe.to_csv(Path.cwd() / 'service_invocations/results/aws_trans.csv', index=False)
+    aws_transcribe.to_csv(_RESULTS_DIR / "aws_trans.csv", index=False)
 
     microsoft_translate = microsoft_translate.drop(columns=['llm_judge_score'])
     microsoft_translate['llm_judge_score'] = data['ms_score']
-    microsoft_translate.to_csv(Path.cwd() / 'service_invocations/results/ms_trans.csv', index=False)
+    microsoft_translate.to_csv(_RESULTS_DIR / "ms_trans.csv", index=False)
