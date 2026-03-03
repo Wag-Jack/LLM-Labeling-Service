@@ -10,8 +10,10 @@ load_dotenv()
 
 _RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "language_translation"  # Task-scoped outputs.
 
-def run_aws_translation(europarl_data):
+def run_aws_translation(europarl_data, results_path: Path | None = None):
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    if results_path is None:
+        results_path = _RESULTS_DIR / "aws_trans.csv"
     # Initialize AWS client to Translate
     translate = boto3.client('translate',
                              region_name=os.getenv("AWS_REGION"),
@@ -47,5 +49,5 @@ def run_aws_translation(europarl_data):
 
     # Convert into DataFrame and save to CSV
     aws_trans_df = pd.DataFrame(data)
-    aws_trans_df.to_csv(_RESULTS_DIR / "aws_trans.csv", index=False)
+    aws_trans_df.to_csv(results_path, index=False)
     return aws_trans_df

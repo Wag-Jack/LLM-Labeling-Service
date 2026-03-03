@@ -6,8 +6,10 @@ from pathlib import Path
 
 _RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "language_translation"  # Task-scoped outputs.
 
-def run_gc_translation(europarl_data):
+def run_gc_translation(europarl_data, results_path: Path | None = None):
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    if results_path is None:
+        results_path = _RESULTS_DIR / "gc_trans.csv"
     # Grab secret key from credentials to tap into Google Cloud Translation
     cred_path = Path.cwd() / 'credentials'
     client_file = cred_path / 'speech_recognition/llm-as-a-judge_gc.json'
@@ -47,6 +49,6 @@ def run_gc_translation(europarl_data):
 
     # Convert into DataFrame and save to CSV
     gc_trans_df = pd.DataFrame(data)
-    gc_trans_df.to_csv(_RESULTS_DIR / "gc_trans.csv", index=False)
+    gc_trans_df.to_csv(results_path, index=False)
 
     return gc_trans_df

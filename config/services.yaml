@@ -29,6 +29,31 @@ service_registry:
     task: stt
     runner: service_invocations.speech_recognition.deepgram_stt:run_deepgram_stt
     results_file: deepgram_stt.csv
+  gc_translation:
+    provider: google
+    task: translation
+    runner: service_invocations.language_translation.google_cloud_translation:run_gc_translation
+    results_file: gc_trans.csv
+  aws_translation:
+    provider: aws
+    task: translation
+    runner: service_invocations.language_translation.aws_translate:run_aws_translation
+    results_file: aws_trans.csv
+  azure_translation:
+    provider: azure
+    task: translation
+    runner: service_invocations.language_translation.microsoft_translator:run_micro_translation
+    results_file: ms_trans.csv
+  deepl_translation:
+    provider: deepl
+    task: translation
+    runner: service_invocations.language_translation.deepl_translation:run_deepl_translation
+    results_file: deepl_trans.csv
+  ibm_watson_translation:
+    provider: ibm
+    task: translation
+    runner: service_invocations.language_translation.ibm_watson_translation:run_ibm_watson_translation
+    results_file: ibm_trans.csv
 
 service_sets:
   speech_transcription:
@@ -46,16 +71,14 @@ service_sets:
       enabled: true
   language_translation:
     - name: gc_translation
-      provider: google
-      task: translation
       enabled: true
     - name: aws_translation
-      provider: aws
-      task: translation
       enabled: true
     - name: azure_translation
-      provider: azure
-      task: translation
+      enabled: true
+    - name: deepl_translation
+      enabled: true
+    - name: ibm_watson_translation
       enabled: true
 
 runtime:
