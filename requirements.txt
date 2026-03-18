@@ -1,5 +1,6 @@
 assemblyai
 boto3
+dashscope
 datasets
 deepgram-sdk
 deepl

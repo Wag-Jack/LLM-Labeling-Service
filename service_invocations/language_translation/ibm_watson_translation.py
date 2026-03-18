@@ -1,6 +1,6 @@
 from dotenv import load_dotenv
 from ibm_cloud_sdk_core.authenticators import IAMAuthenticator
-from ibm_watson import LanguageTranslatorV3
+from ibm_watson.language_translator_v3 import LanguageTranslatorV3
 import os
 import pandas as pd
 from pathlib import Path

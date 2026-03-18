@@ -4,13 +4,13 @@ chat_multimodal_v1:
       task: chat
       model: gpt-4o
       modalities: ["text", "audio", "image"]
-      enabled: false
+      enabled: true
     - name: gemini_1_5_pro
       provider: gemini
       task: chat
       model: gemini-1.5-pro
       modalities: ["text", "audio", "image"]
-      enabled: false
+      enabled: true
 
 models:
   gpt_4o:

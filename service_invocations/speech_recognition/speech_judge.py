@@ -29,13 +29,9 @@ def _slugify_model(name: str) -> str:
 
 
 def _normalize_model_entries(model_entries):
-    # Accept None (use default), dict (single), or list (multi) model inputs.
+    # Accept None (no models), dict (single), or list (multi) model inputs.
     if model_entries is None:
-        return [{
-            "name": "gpt_audio",
-            "provider": "openai",
-            "model": "gpt-audio",
-        }]
+        return []
     if isinstance(model_entries, dict):
         if not model_entries.get("enabled", True):
             return []
@@ -47,13 +43,16 @@ def _normalize_model_entries(model_entries):
 
 def judge_transcripts(results_by_service, edacc_data, use_existing=False,
                       results_dir=None, config_path: Path | None = None,
-                      model_entries=None):
+                      model_entries=None, service_registry: dict | None = None):
     if results_dir is None:
         results_dir = Path.cwd() / "service_invocations" / "results" / "speech_recognition"
     results_dir.mkdir(parents=True, exist_ok=True)
     # results_by_service can be passed directly or loaded from disk if use_existing=True.
 
-    service_registry = load_service_registry(config_path)
+    if service_registry is None:
+        service_registry = load_service_registry(config_path)
+    if not isinstance(service_registry, dict):
+        raise ValueError("service_registry must be a mapping.")
     active_services = {
         name: entry
         for name, entry in service_registry.items()
@@ -78,10 +77,14 @@ def judge_transcripts(results_by_service, edacc_data, use_existing=False,
 
     # Normalize incoming model configuration into a list.
     normalized_models = _normalize_model_entries(model_entries)
+    if not normalized_models:
+        raise ValueError("No model entries provided for judging.")
     supported_models = []
     for entry in normalized_models:
-        provider = entry.get("provider", "openai")
+        provider = entry.get("provider")
         model_id = entry.get("model")
+        if not provider:
+            continue
         if provider != "openai" or not model_id:
             continue
         supported_models.append(entry)
@@ -103,7 +106,7 @@ def judge_transcripts(results_by_service, edacc_data, use_existing=False,
 
     for model_entry in supported_models:
         # Each model gets its own judge outputs (file + per-service score column).
-        provider = model_entry.get("provider", "openai")
+        provider = model_entry.get("provider")
         if provider != "openai":
             print(f"Skipping model '{model_entry.get('name')}' (provider {provider} not supported).")
             continue

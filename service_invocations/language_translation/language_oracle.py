@@ -1,13 +1,9 @@
-from dotenv import load_dotenv
 import json
-from openai import OpenAI
-import os
 import pandas as pd
 from pathlib import Path
 import re
-import time
 
-load_dotenv()
+from service_invocations.core.llm_adapters import get_llm_adapter, UnsupportedProviderError
 
 
 _ID_RE = re.compile(r"(\d+)$")  # Extract trailing digits for stable id normalization.
@@ -34,12 +30,9 @@ def _slugify_model(name: str) -> str:
 
 
 def _normalize_model_entries(model_entries):
+    # Accept None (no models), dict (single), or list (multi) model inputs.
     if model_entries is None:
-        return [{
-            "name": "gpt_4o_mini",
-            "provider": "openai",
-            "model": "gpt-4o-mini",
-        }]
+        return []
     if isinstance(model_entries, dict):
         if not model_entries.get("enabled", True):
             return []
@@ -61,8 +54,9 @@ def generate_oracle_translations(europarl_data, use_existing=False, results_path
     normalized_models = _normalize_model_entries(model_entries)
     if len(normalized_models) > 1:
         return_by_model = True
-
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    if not normalized_models:
+        print("Skipping LLM Oracle Translation (no model entries provided).")
+        return {} if return_by_model else pd.DataFrame({"id": [], "llm_oracle": []})
 
     english_inputs = europarl_data["english"].tolist()
     ids = europarl_data["id"].tolist()
@@ -70,15 +64,30 @@ def generate_oracle_translations(europarl_data, use_existing=False, results_path
     results_by_model = {}
 
     for model_entry in normalized_models:
-        provider = model_entry.get("provider", "openai")
-        if provider != "openai":
-            print(f"Skipping model '{model_entry.get('name')}' (provider {provider} not supported).")
+        model_name = model_entry.get("name") or model_entry.get("model") or "model"
+        provider = model_entry.get("provider")
+        if not provider:
+            print(f"Skipping model '{model_name}' (missing provider).")
+            continue
+        try:
+            adapter = get_llm_adapter(provider)
+        except UnsupportedProviderError:
+            print(f"Skipping model '{model_name}' (provider {provider} not supported).")
             continue
 
-        model_name = model_entry.get("name") or model_entry.get("model") or "model"
         model_id = model_entry.get("model")
         if not model_id:
             print(f"Skipping model '{model_name}' (missing model id).")
+            continue
+        modalities = model_entry.get("modalities")
+        if modalities is None:
+            modalities = ["text"]
+        elif isinstance(modalities, (list, tuple)):
+            modalities = list(modalities)
+        else:
+            raise ValueError("modalities must be a list when provided.")
+        if "text" not in modalities:
+            print(f"Skipping model '{model_name}' (modalities exclude text).")
             continue
 
         model_slug = _slugify_model(model_name)
@@ -113,42 +122,24 @@ def generate_oracle_translations(europarl_data, use_existing=False, results_path
                       If you violate this, the output will be discarded.
                       """
 
-            start_time = time.perf_counter()
-            response = client.chat.completions.create(
+            response = adapter.generate(
                 model=model_id,
-                modalities=['text'],
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {"type": "text", "text": english},
-                        ]
-                    }
-                ]
+                prompt=prompt,
+                inputs={"text": english},
+                modalities=modalities,
             )
-            latency_ms = (time.perf_counter() - start_time) * 1000.0
-            usage = getattr(response, "usage", None)
-            input_tokens = getattr(usage, "input_tokens", None)
-            output_tokens = getattr(usage, "output_tokens", None)
-            prompt_tokens = getattr(usage, "prompt_tokens", None)
-            completion_tokens = getattr(usage, "completion_tokens", None)
-            if input_tokens is None:
-                input_tokens = prompt_tokens
-            if output_tokens is None:
-                output_tokens = completion_tokens
 
-            print(f"{response.choices[0].message.content}")
+            print(f"{response.content}")
             try:
-                llm_output = json.loads(response.choices[0].message.content)
+                llm_output = json.loads(response.content)
             except json.JSONDecodeError:
                 llm_output = {"llm_oracle": "n/a"}
 
             data["id"].append(_normalize_id(sample_id))
             data["llm_oracle"].append(llm_output.get("llm_oracle", "n/a"))
-            data["latency_ms"].append(round(latency_ms, 2))
-            data["input_tokens"].append(input_tokens)
-            data["output_tokens"].append(output_tokens)
+            data["latency_ms"].append(response.latency_ms)
+            data["input_tokens"].append(response.input_tokens)
+            data["output_tokens"].append(response.output_tokens)
 
         oracle_results = pd.DataFrame(data)
         oracle_results.to_csv(model_results_path, index=False)

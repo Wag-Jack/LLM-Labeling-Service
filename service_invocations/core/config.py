@@ -90,7 +90,36 @@ def get_model_entries(config: Dict[str, Any], name: str) -> List[Dict[str, Any]]
     Supports:
     - top-level list sets (e.g., chat_multimodal_v1)
     - single-model entries under the "models" mapping
+    - "all" or "*" to return entries from top-level list sets plus "models"
     """
+    if name in {"all", "*"}:
+        entries_by_name: Dict[str, Dict[str, Any]] = {}
+
+        # Include any top-level list sets (e.g., chat_multimodal_v1).
+        for set_name, model_set in config.items():
+            if set_name == "models" or not isinstance(model_set, list):
+                continue
+            for entry in model_set:
+                if not isinstance(entry, dict):
+                    raise ValueError("Model set entries must be mappings.")
+                if not entry.get("enabled", True):
+                    continue
+                if "name" not in entry:
+                    raise ValueError("Model set entries must include a name.")
+                # Prefer top-level set entries on name collisions.
+                entries_by_name.setdefault(entry["name"], entry)
+
+        # Include single-model entries under the "models" mapping.
+        models = get_models_config(config)
+        for model_name, model_entry in models.items():
+            if not isinstance(model_entry, dict):
+                raise ValueError("model set entries must be mappings.")
+            if not model_entry.get("enabled", True):
+                continue
+            entries_by_name.setdefault(model_name, {"name": model_name, **model_entry, "enabled": True})
+
+        return list(entries_by_name.values())
+
     # Prefer top-level model sets when present (used for multi-model runs).
     if name in config:
         model_set = config.get(name)

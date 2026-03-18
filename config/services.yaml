@@ -49,11 +49,6 @@ service_registry:
     task: translation
     runner: service_invocations.language_translation.deepl_translation:run_deepl_translation
     results_file: deepl_trans.csv
-  ibm_watson_translation:
-    provider: ibm
-    task: translation
-    runner: service_invocations.language_translation.ibm_watson_translation:run_ibm_watson_translation
-    results_file: ibm_trans.csv
 
 service_sets:
   speech_transcription:
@@ -77,8 +72,6 @@ service_sets:
     - name: azure_translation
       enabled: true
     - name: deepl_translation
-      enabled: true
-    - name: ibm_watson_translation
       enabled: true
 
 runtime:
