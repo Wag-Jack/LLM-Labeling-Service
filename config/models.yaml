@@ -11,6 +11,12 @@ chat_multimodal_v1:
       model: gemini-1.5-pro
       modalities: ["text", "audio", "image"]
       enabled: true
+    - name: phi_4_multimodal_instruct
+      provider: microsoft
+      task: chat
+      model: phi-4-multimodal-instruct
+      modalities: ["text", "image"]
+      enabled: true
 
 models:
   gpt_4o:
@@ -28,9 +34,6 @@ models:
   gemini_2_5_flash_lite:
     provider: google
     model: gemini-2.5-flash-lite
-  quen_3_omni_flash:
-    provider: alibaba
-    model: quen-3-omni-flash
-  quen_2_5_omni:
-    provider: alibaba
-    model: quen-2.5-omni
+  phi-4-multimodal-instruct:
+    provider: microsoft
+    model: phi-4-multimodal-instruct

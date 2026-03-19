@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import base64
 import os
 from pathlib import Path
 import time
 from typing import Any, Dict, List
+from urllib import error as url_error
+from urllib import request as url_request
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -75,109 +78,6 @@ def _build_openai_messages(prompt: str, inputs: Dict[str, Any]) -> List[Dict[str
         })
 
     return [{"role": "user", "content": content}]
-
-
-def _is_http_url(value: str) -> bool:
-    return value.startswith("http://") or value.startswith("https://")
-
-
-def _to_data_url(value: Any, media_type: str, default_format: str) -> str:
-    if isinstance(value, str):
-        if value.startswith("data:") or _is_http_url(value):
-            return value
-    media_bytes = _read_bytes(value)
-    media_format = _infer_format(value, default_format)
-    media_b64 = base64.b64encode(media_bytes).decode("utf-8")
-    return f"data:{media_type}/{media_format};base64,{media_b64}"
-
-
-def _build_dashscope_messages(prompt: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
-    text_parts: List[str] = []
-    if prompt:
-        text_parts.append(prompt)
-
-    text_input = inputs.get("text")
-    if text_input:
-        text_parts.append(text_input)
-
-    image_input = inputs.get("image")
-    audio_input = inputs.get("audio")
-
-    # DashScope expects a string for text-only inputs and a list for multimodal content.
-    if image_input is None and audio_input is None:
-        return [{"role": "user", "content": "\n".join(text_parts).strip()}]
-
-    content: List[Dict[str, Any]] = []
-    if text_parts:
-        content.append({"text": "\n".join(text_parts)})
-
-    if image_input is not None:
-        image_format = inputs.get("image_format") or _infer_format(image_input, "png")
-        content.append({"image": _to_data_url(image_input, "image", image_format)})
-
-    if audio_input is not None:
-        audio_format = inputs.get("audio_format") or _infer_format(audio_input, "wav")
-        content.append({"audio": _to_data_url(audio_input, "audio", audio_format)})
-
-    return [{"role": "user", "content": content}]
-
-
-def _normalize_dashscope_content(content: Any) -> str:
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        text_parts: List[str] = []
-        for item in content:
-            if isinstance(item, dict) and "text" in item:
-                text_parts.append(str(item["text"]))
-            elif isinstance(item, str):
-                text_parts.append(item)
-        if text_parts:
-            return "".join(text_parts)
-    return str(content)
-
-
-def _extract_dashscope_content(response: Any) -> str:
-    output = getattr(response, "output", None)
-    if output is None and isinstance(response, dict):
-        output = response.get("output")
-
-    choices = None
-    if output is not None:
-        choices = getattr(output, "choices", None)
-        if choices is None and isinstance(output, dict):
-            choices = output.get("choices")
-
-    if choices:
-        first_choice = choices[0]
-        message = None
-        if isinstance(first_choice, dict):
-            message = first_choice.get("message")
-        else:
-            message = getattr(first_choice, "message", None)
-        if message is not None:
-            if isinstance(message, dict):
-                return _normalize_dashscope_content(message.get("content"))
-            return _normalize_dashscope_content(getattr(message, "content", None))
-
-    if isinstance(output, dict):
-        text = output.get("text") or output.get("output_text")
-        if text is not None:
-            return str(text)
-    if isinstance(response, dict):
-        text = response.get("text")
-        if text is not None:
-            return str(text)
-    return str(response)
-
-
-def _normalize_dashscope_base_url(base_url: str) -> str:
-    normalized = base_url.rstrip("/")
-    if normalized.endswith("/compatible-mode/v1"):
-        normalized = normalized.replace("/compatible-mode/v1", "/api/v1")
-    return normalized
 
 
 class OpenAIAdapter:
@@ -318,74 +218,74 @@ class GeminiAdapter:
         )
 
 
-class QwenAdapter:
+class MicrosoftPhiAdapter:
     def __init__(self) -> None:
-        api_key = os.getenv("DASHSCOPE_API_KEY") or os.getenv("QWEN_API_KEY")
+        api_key = os.getenv("MICROSOFT_PHI_KEY")
         if not api_key:
             raise UnsupportedProviderError(
-                "Qwen adapter requires DASHSCOPE_API_KEY or QWEN_API_KEY."
+                "Microsoft Phi adapter requires MICROSOFT_PHI_KEY."
             )
-        try:
-            import dashscope  # type: ignore
-        except Exception as exc:
+        target_uri = os.getenv("PHI_TARGET_URI")
+        if not target_uri:
             raise UnsupportedProviderError(
-                "Qwen adapter requires the DashScope SDK (`dashscope`)."
-            ) from exc
-
-        base_url = (
-            os.getenv("DASHSCOPE_HTTP_API_URL")
-            or os.getenv("DASHSCOPE_BASE_URL")
-            or os.getenv("QWEN_BASE_URL")
-            or "https://dashscope.aliyuncs.com/api/v1"
-        )
-        base_url = _normalize_dashscope_base_url(base_url)
-
-        dashscope.base_http_api_url = base_url
-        dashscope.api_key = api_key
-
-        self._dashscope = dashscope
+                "Microsoft Phi adapter requires PHI_TARGET_URI."
+            )
         self._api_key = api_key
-        self._base_url = base_url
+        self._target_uri = target_uri
+
+    def _post_json(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        data = json.dumps(payload).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "api-key": self._api_key,
+        }
+        req = url_request.Request(
+            self._target_uri,
+            data=data,
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with url_request.urlopen(req) as resp:
+                body = resp.read()
+        except url_error.HTTPError as exc:
+            body = exc.read()
+            detail = body.decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"Microsoft Phi request failed: HTTP {exc.code} {exc.reason} - {detail}"
+            ) from exc
+        return json.loads(body.decode("utf-8"))
 
     def generate(self, model: str, prompt: str, inputs: Dict[str, Any],
                  modalities: List[str]) -> LLMResponse:
-        messages = _build_dashscope_messages(prompt, inputs)
-        audio_input = inputs.get("audio")
+        messages = _build_openai_messages(prompt, inputs)
         start_time = time.perf_counter()
-        use_multimodal = isinstance(messages[0].get("content"), list)
-        if use_multimodal:
-            kwargs: Dict[str, Any] = {
-                "api_key": self._api_key,
-                "model": model,
-                "messages": messages,
-                "result_format": "message",
-            }
-            if audio_input is not None and inputs.get("asr_options") is not None:
-                kwargs["asr_options"] = inputs["asr_options"]
-            response = self._dashscope.MultiModalConversation.call(**kwargs)
-        else:
-            response = self._dashscope.Generation.call(
-                api_key=self._api_key,
-                model=model,
-                messages=messages,
-                result_format="message",
-            )
+        payload: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+        }
+        response = self._post_json(payload)
         latency_ms = (time.perf_counter() - start_time) * 1000.0
-        usage = getattr(response, "usage", None)
-        if usage is None and isinstance(response, dict):
-            usage = response.get("usage")
-
+        usage = response.get("usage") if isinstance(response, dict) else None
         input_tokens = None
         output_tokens = None
-        if usage is not None:
-            if isinstance(usage, dict):
-                input_tokens = usage.get("input_tokens") or usage.get("prompt_tokens")
-                output_tokens = usage.get("output_tokens") or usage.get("completion_tokens")
-            else:
-                input_tokens = getattr(usage, "input_tokens", None) or getattr(usage, "prompt_tokens", None)
-                output_tokens = getattr(usage, "output_tokens", None) or getattr(usage, "completion_tokens", None)
-
-        content = _extract_dashscope_content(response)
+        prompt_tokens = None
+        completion_tokens = None
+        if isinstance(usage, dict):
+            input_tokens = usage.get("input_tokens")
+            output_tokens = usage.get("output_tokens")
+            prompt_tokens = usage.get("prompt_tokens")
+            completion_tokens = usage.get("completion_tokens")
+        if input_tokens is None:
+            input_tokens = prompt_tokens
+        if output_tokens is None:
+            output_tokens = completion_tokens
+        content = ""
+        if isinstance(response, dict):
+            choices = response.get("choices") or []
+            if choices:
+                message = choices[0].get("message", {})
+                content = message.get("content", "")
         return LLMResponse(
             content=content,
             latency_ms=round(latency_ms, 2),
@@ -410,10 +310,12 @@ def get_llm_adapter(provider: str) -> Any:
     provider_aliases = {
         "google": "gemini",
         "gemini": "gemini",
-        "alibaba": "qwen",
-        "qwen": "qwen",
-        "quen": "qwen",
-        "dashscope": "qwen",
+        "microsoft": "microsoft",
+        "msft": "microsoft",
+        "phi": "microsoft",
+        "phi-4": "microsoft",
+        "phi_4": "microsoft",
+        "phi4": "microsoft",
     }
     provider_key = provider_aliases.get(provider_key, provider_key)
     adapter = _ADAPTER_CACHE.get(provider_key)
@@ -427,8 +329,8 @@ def get_llm_adapter(provider: str) -> Any:
         adapter = GeminiAdapter()
         _ADAPTER_CACHE[provider_key] = adapter
         return adapter
-    if provider_key == "qwen":
-        adapter = QwenAdapter()
+    if provider_key == "microsoft":
+        adapter = MicrosoftPhiAdapter()
         _ADAPTER_CACHE[provider_key] = adapter
         return adapter
     raise UnsupportedProviderError(f"provider '{provider}' is not supported yet")
