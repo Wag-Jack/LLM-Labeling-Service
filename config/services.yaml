@@ -1,83 +1,23 @@
-service_registry:
-  gc_stt:
-    provider: google
-    task: stt
-    runner: service_invocations.speech_recognition.google_cloud_stt:run_gc_stt
-    results_file: gc_stt.csv
-  aws_stt:
-    provider: aws
-    task: stt
-    runner: service_invocations.speech_recognition.aws_transcribe:run_aws_transcribe
-    results_file: aws_stt.csv
-  assemblyai_stt:
-    provider: assemblyai
-    task: stt
-    runner: service_invocations.speech_recognition.assemblyai:run_assemblyai
-    results_file: aa_stt.csv
+speech_recognition:
+  google_cloud_stt:
+    enabled: true
+  assemblyai:
+    enabled: true
+  aws_transcribe:
+    enabled: true
   ibm_watson_stt:
-    provider: ibm
-    task: stt
-    runner: service_invocations.speech_recognition.ibm_watson_stt:run_ibm_watson_stt
-    results_file: ibm_stt.csv
+    enabled: true
   speechmatics_stt:
-    provider: speechmatics
-    task: stt
-    runner: service_invocations.speech_recognition.speechmatics_stt:run_speechmatics_stt
-    results_file: speechmatics_stt.csv
+    enabled: true
   deepgram_stt:
-    provider: deepgram
-    task: stt
-    runner: service_invocations.speech_recognition.deepgram_stt:run_deepgram_stt
-    results_file: deepgram_stt.csv
-  gc_translation:
-    provider: google
-    task: translation
-    runner: service_invocations.language_translation.google_cloud_translation:run_gc_translation
-    results_file: gc_trans.csv
-  aws_translation:
-    provider: aws
-    task: translation
-    runner: service_invocations.language_translation.aws_translate:run_aws_translation
-    results_file: aws_trans.csv
-  azure_translation:
-    provider: azure
-    task: translation
-    runner: service_invocations.language_translation.microsoft_translator:run_micro_translation
-    results_file: ms_trans.csv
+    enabled: true
+
+language_translation:
+  google_cloud_translation:
+    enabled: true
+  aws_translate:
+    enabled: true
+  microsoft_translator:
+    enabled: true
   deepl_translation:
-    provider: deepl
-    task: translation
-    runner: service_invocations.language_translation.deepl_translation:run_deepl_translation
-    results_file: deepl_trans.csv
-
-service_sets:
-  speech_transcription:
-    - name: gc_stt
-      enabled: true
-    - name: aws_stt
-      enabled: true
-    - name: assemblyai_stt
-      enabled: true
-    - name: ibm_watson_stt
-      enabled: true
-    - name: speechmatics_stt
-      enabled: true
-    - name: deepgram_stt
-      enabled: true
-  language_translation:
-    - name: gc_translation
-      enabled: true
-    - name: aws_translation
-      enabled: true
-    - name: azure_translation
-      enabled: true
-    - name: deepl_translation
-      enabled: true
-
-runtime:
-  max_concurrency: 6
-  retries: 2
-  timeout_s: 60
-
-metrics:
-  output_path: service_invocations/results/metrics.csv
+    enabled: true

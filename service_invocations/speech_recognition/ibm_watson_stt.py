@@ -9,6 +9,7 @@ import time
 load_dotenv()
 
 _RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition"  # Task-scoped outputs.
+RESULTS_FILE = "ibm_stt.csv"
 # Runs in the main project environment (no provider-specific venv required).
 
 
@@ -26,7 +27,7 @@ def run_ibm_watson_stt(edacc_data, results_path: Path | None = None):
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     # Allow an explicit output path for orchestrated runs.
     if results_path is None:
-        results_path = _RESULTS_DIR / "ibm_stt.csv"
+        results_path = _RESULTS_DIR / RESULTS_FILE
 
     api_key = os.getenv("IBM_WATSON_API_KEY")
     service_url = os.getenv("IBM_WATSON_URL")
@@ -72,3 +73,7 @@ def run_ibm_watson_stt(edacc_data, results_path: Path | None = None):
     ibm_df = pd.DataFrame(data)
     ibm_df.to_csv(results_path, index=False)
     return ibm_df
+
+
+def run(edacc_data):
+    return run_ibm_watson_stt(edacc_data)

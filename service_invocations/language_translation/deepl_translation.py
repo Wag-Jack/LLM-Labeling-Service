@@ -47,3 +47,7 @@ def run_deepl_translation(europarl_data, results_path: Path | None = None):
     deepl_df = pd.DataFrame(data)
     deepl_df.to_csv(results_path, index=False)
     return deepl_df
+
+
+def run(europarl_data):
+    return run_deepl_translation(europarl_data)

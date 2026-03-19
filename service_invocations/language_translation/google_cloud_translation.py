@@ -52,3 +52,7 @@ def run_gc_translation(europarl_data, results_path: Path | None = None):
     gc_trans_df.to_csv(results_path, index=False)
 
     return gc_trans_df
+
+
+def run(europarl_data):
+    return run_gc_translation(europarl_data)

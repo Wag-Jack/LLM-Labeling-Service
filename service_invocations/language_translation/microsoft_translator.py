@@ -62,3 +62,8 @@ def run_micro_translation(europarl_data, results_path: Path | None = None):
     # Convert into DataFrame and save to CSV
     ms_trans_df = pd.DataFrame(data)
     ms_trans_df.to_csv(results_path, index=False)
+    return ms_trans_df
+
+
+def run(europarl_data):
+    return run_micro_translation(europarl_data)

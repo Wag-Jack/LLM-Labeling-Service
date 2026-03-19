@@ -10,6 +10,7 @@ import time as perf_time
 load_dotenv()
 
 _RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition"  # Task-scoped outputs.
+RESULTS_FILE = "aws_stt.csv"
 
 S3_URI = "s3://llm-as-a-judge-edacc-storage"
 
@@ -88,5 +89,9 @@ def run_aws_transcribe(edacc_data):
 
     # Convert into DataFrame and save to CSV
     aws_stt_df = pd.DataFrame(data)
-    aws_stt_df.to_csv(_RESULTS_DIR / "aws_stt.csv", index=False)
+    aws_stt_df.to_csv(_RESULTS_DIR / RESULTS_FILE, index=False)
     return aws_stt_df
+
+
+def run(edacc_data):
+    return run_aws_transcribe(edacc_data)

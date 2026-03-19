@@ -143,4 +143,6 @@ def get_model_entries(config: Dict[str, Any], name: str) -> List[Dict[str, Any]]
         raise KeyError(f"Unknown model set: {name}")
     if not isinstance(model_entry, dict):
         raise ValueError("model set entries must be mappings.")
+    if not model_entry.get("enabled", True):
+        return []
     return [{"name": name, **model_entry, "enabled": True}]

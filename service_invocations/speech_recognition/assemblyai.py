@@ -8,6 +8,7 @@ import time
 load_dotenv()
 
 _RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition"  # Task-scoped outputs.
+RESULTS_FILE = "aa_stt.csv"
 
 def run_assemblyai(edacc_data):
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -45,5 +46,9 @@ def run_assemblyai(edacc_data):
 
     # Convert into DataFrame and save to CSV
     aa_stt_df = pd.DataFrame(data)
-    aa_stt_df.to_csv(_RESULTS_DIR / "aa_stt.csv", index=False)
+    aa_stt_df.to_csv(_RESULTS_DIR / RESULTS_FILE, index=False)
     return aa_stt_df
+
+
+def run(edacc_data):
+    return run_assemblyai(edacc_data)

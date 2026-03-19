@@ -51,3 +51,7 @@ def run_aws_translation(europarl_data, results_path: Path | None = None):
     aws_trans_df = pd.DataFrame(data)
     aws_trans_df.to_csv(results_path, index=False)
     return aws_trans_df
+
+
+def run(europarl_data):
+    return run_aws_translation(europarl_data)

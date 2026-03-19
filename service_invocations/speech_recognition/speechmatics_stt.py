@@ -10,6 +10,7 @@ from speechmatics.batch import AsyncClient, JobConfig, JobType, TranscriptionCon
 load_dotenv()
 
 _RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition"  # Task-scoped outputs.
+RESULTS_FILE = "speechmatics_stt.csv"
 # Runs in the main project environment (no provider-specific venv required).
 
 
@@ -45,7 +46,7 @@ async def _transcribe_all(edacc_data) -> list[tuple[str, float]]:
 def run_speechmatics_stt(edacc_data, results_path: Path | None = None):
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     if results_path is None:
-        results_path = _RESULTS_DIR / "speechmatics_stt.csv"
+        results_path = _RESULTS_DIR / RESULTS_FILE
 
     api_key = os.getenv("SPEECHMATICS_API_KEY")
     if not api_key:
@@ -73,3 +74,7 @@ def run_speechmatics_stt(edacc_data, results_path: Path | None = None):
     sm_df = pd.DataFrame(data)
     sm_df.to_csv(results_path, index=False)
     return sm_df
+
+
+def run(edacc_data):
+    return run_speechmatics_stt(edacc_data)

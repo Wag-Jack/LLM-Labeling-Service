@@ -8,6 +8,7 @@ import time
 load_dotenv()
 
 _RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition"  # Task-scoped outputs.
+RESULTS_FILE = "deepgram_stt.csv"
 # Uses the Deepgram REST API directly (no SDK dependency).
 
 
@@ -69,5 +70,9 @@ def run_deepgram_stt(edacc_data):
     data["llm_judge_score"] = [0.0 for _ in data["id"]]
 
     deepgram_df = pd.DataFrame(data)
-    deepgram_df.to_csv(_RESULTS_DIR / "deepgram_stt.csv", index=False)
+    deepgram_df.to_csv(_RESULTS_DIR / RESULTS_FILE, index=False)
     return deepgram_df
+
+
+def run(edacc_data):
+    return run_deepgram_stt(edacc_data)
