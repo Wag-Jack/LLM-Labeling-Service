@@ -111,11 +111,11 @@ Service transcripts:
 """
 
     for model_name in enabled_models:
-        module = import_module(f"service_invocations.speech_recognition.{model_name}")
-        judge_fn = getattr(module, "judge", None)
-        if judge_fn is None or not callable(judge_fn):
+        module = import_module(f"service_invocations.models.{model_name}")
+        generator = getattr(module, "generate", None)
+        if generator is None or not callable(generator):
             raise AttributeError(
-                f"Model script '{model_name}' must define a judge(...) function."
+                f"Model script '{model_name}' must define a generate(...) function."
             )
 
         model_slug = _slugify_model(model_name)
@@ -138,7 +138,8 @@ Service transcripts:
             )
             prompt = build_prompt(service_blocks)
 
-            content = judge_fn(wav, prompt)
+            response = generator(prompt, inputs={"audio": wav})
+            content = response.content
             print(content)
 
             default_scores = {name: -1 for name in services.keys()}
@@ -171,7 +172,9 @@ Service transcripts:
             df = df.drop(columns=[score_column], errors="ignore")
             df[score_column] = df["id"].map(_normalize_id).map(score_map).fillna(-1)
 
-            service_module = import_module(f"service_invocations.speech_recognition.{name}")
+            service_module = import_module(
+                f"service_invocations.speech_recognition.services.{name}"
+            )
             results_file = getattr(service_module, "RESULTS_FILE", f"{name}.csv")
             df.to_csv(results_dir / results_file, index=False)
 

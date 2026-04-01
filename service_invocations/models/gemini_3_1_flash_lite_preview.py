@@ -1,0 +1,27 @@
+from __future__ import annotations
+
+from typing import Any, Dict, List
+import os
+
+from service_invocations.core.llm_adapters import LLMResponse, get_llm_adapter
+from service_invocations.models.common import infer_modalities
+
+
+MODEL_ID = os.getenv(
+    "GEMINI_3_1_FLASH_LITE_PREVIEW_MODEL_ID",
+    "gemini-3.1-flash-lite-preview",
+)
+PROVIDER = "gemini"
+SUPPORTED_MODALITIES = ["text", "audio", "image"]
+
+
+def generate(
+    prompt: str,
+    inputs: Dict[str, Any] | None = None,
+    modalities: List[str] | None = None,
+) -> LLMResponse:
+    payload_inputs = inputs or {}
+    requested_modalities = modalities or infer_modalities(payload_inputs)
+    adapter = get_llm_adapter(PROVIDER)
+    return adapter.generate(MODEL_ID, prompt, payload_inputs, requested_modalities)
+

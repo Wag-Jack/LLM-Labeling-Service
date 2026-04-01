@@ -74,7 +74,9 @@ def run_language_translation(
     results: dict[str, pd.DataFrame] = {}
     for service_name in enabled_services:
         print(f"--- {service_name} ---")
-        module = import_module(f"service_invocations.language_translation.{service_name}")
+        module = import_module(
+            f"service_invocations.language_translation.services.{service_name}"
+        )
         runner = getattr(module, "run", None)
         if runner is None or not callable(runner):
             raise AttributeError(

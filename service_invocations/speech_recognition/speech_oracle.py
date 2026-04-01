@@ -75,17 +75,43 @@ def generate_oracle_transcripts(
             results_by_model[model_name] = pd.read_csv(results_path)
             continue
 
-        module = import_module(f"service_invocations.speech_recognition.{model_name}")
-        runner = getattr(module, "run", None)
-        if runner is None or not callable(runner):
+        module = import_module(f"service_invocations.models.{model_name}")
+        generator = getattr(module, "generate", None)
+        if generator is None or not callable(generator):
             raise AttributeError(
-                f"Model script '{model_name}' must define a run(...) function."
+                f"Model script '{model_name}' must define a generate(...) function."
             )
-        results_by_model[model_name] = runner(
-            edacc_data,
-            prompt=_PROMPT,
-            results_path=results_path,
-        )
+
+        data = {
+            "id": [],
+            "llm_oracle": [],
+            "latency_ms": [],
+            "input_tokens": [],
+            "output_tokens": [],
+        }
+
+        for _, row in edacc_data.iterrows():
+            sample_id = row["id"]
+            audio_file = row["audio"]
+            print(f"LLM Oracle Transcript ({model_name}): {audio_file}")
+
+            response = generator(
+                _PROMPT,
+                inputs={"audio": audio_file},
+            )
+            content = response.content
+            print(content)
+            llm_oracle = _extract_oracle(content)
+
+            data["id"].append(_normalize_id(sample_id))
+            data["llm_oracle"].append(llm_oracle)
+            data["latency_ms"].append(response.latency_ms)
+            data["input_tokens"].append(response.input_tokens)
+            data["output_tokens"].append(response.output_tokens)
+
+        results_df = pd.DataFrame(data)
+        results_df.to_csv(results_path, index=False)
+        results_by_model[model_name] = results_df
 
     if multiple_models:
         return results_by_model

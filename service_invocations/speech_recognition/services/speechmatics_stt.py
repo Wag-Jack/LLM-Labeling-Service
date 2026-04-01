@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 import os
 import pandas as pd
 from pathlib import Path
+import re
 import time
 
 from speechmatics.batch import AsyncClient, JobConfig, JobType, TranscriptionConfig
@@ -13,13 +14,22 @@ _RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognit
 RESULTS_FILE = "speechmatics_stt.csv"
 # Runs in the main project environment (no provider-specific venv required).
 
+_SPEAKER_PREFIX_RE = re.compile(r"^SPEAKER\s+[^:]+:\s*", re.IGNORECASE | re.MULTILINE)
+
+
+def _clean_transcript(text: str) -> str:
+    if not text:
+        return ""
+    cleaned = _SPEAKER_PREFIX_RE.sub("", text)
+    return cleaned.strip()
+
 
 def _extract_transcript(result) -> str:
     # speechmatics-batch returns a result object with transcript_text; fall back to dict access.
     if hasattr(result, "transcript_text"):
-        return result.transcript_text or ""
+        return _clean_transcript(result.transcript_text or "")
     if isinstance(result, dict):
-        return result.get("transcript_text") or ""
+        return _clean_transcript(result.get("transcript_text") or "")
     return ""
 
 

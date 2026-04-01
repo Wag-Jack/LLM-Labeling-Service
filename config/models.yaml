@@ -1,15 +1,19 @@
 speech_recognition:
-  gpt_4o:
-    enabled: false
-  gemini_2_5_flash_lite:
-    enabled: false
   phi_4_multimodal_instruct:
+    enabled: true
+  gemini_3_1_flash_lite_preview:
+    enabled: true
+  gemini_2_5_pro:
+    enabled: true
+  amazon_nova_multimodal_embeddings:
     enabled: true
 
 language_translation:
-  gpt_4o:
-    enabled: false
-  gemini_2_5_flash_lite:
-    enabled: false
   phi_4_multimodal_instruct:
-    enabled: true
+    enabled: false
+  gemini_3_1_flash_lite_preview:
+    enabled: false
+  gemini_2_5_pro:
+    enabled: false
+  amazon_nova_multimodal_embeddings:
+    enabled: false

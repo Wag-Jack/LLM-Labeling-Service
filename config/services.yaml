@@ -1,23 +1,23 @@
 speech_recognition:
   google_cloud_stt:
-    enabled: true
+    enabled: false
   assemblyai:
     enabled: true
   aws_transcribe:
-    enabled: true
+    enabled: false
   ibm_watson_stt:
-    enabled: true
+    enabled: false
   speechmatics_stt:
-    enabled: true
+    enabled: false
   deepgram_stt:
-    enabled: true
+    enabled: false
 
 language_translation:
   google_cloud_translation:
-    enabled: true
+    enabled: false
   aws_translate:
-    enabled: true
+    enabled: false
   microsoft_translator:
-    enabled: true
+    enabled: false
   deepl_translation:
-    enabled: true
+    enabled: false

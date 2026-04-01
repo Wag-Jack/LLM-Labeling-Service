@@ -1,4 +1,5 @@
 from importlib import import_module
+import json
 from pathlib import Path
 import re
 
@@ -18,6 +19,16 @@ If you violate this, the output will be discarded.
 """
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _extract_oracle(content: str) -> str:
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError:
+        return "n/a"
+    if not isinstance(payload, dict):
+        return "n/a"
+    return payload.get("llm_oracle", "n/a")
 
 
 def _slugify_model(name: str) -> str:
@@ -75,17 +86,43 @@ def generate_oracle_translations(
             results_by_model[model_name] = pd.read_csv(results_path)
             continue
 
-        module = import_module(f"service_invocations.language_translation.{model_name}")
-        runner = getattr(module, "run", None)
-        if runner is None or not callable(runner):
+        module = import_module(f"service_invocations.models.{model_name}")
+        generator = getattr(module, "generate", None)
+        if generator is None or not callable(generator):
             raise AttributeError(
-                f"Model script '{model_name}' must define a run(...) function."
+                f"Model script '{model_name}' must define a generate(...) function."
             )
-        results_by_model[model_name] = runner(
-            europarl_data,
-            prompt=_PROMPT,
-            results_path=results_path,
-        )
+
+        data = {
+            "id": [],
+            "llm_oracle": [],
+            "latency_ms": [],
+            "input_tokens": [],
+            "output_tokens": [],
+        }
+
+        for _, row in europarl_data.iterrows():
+            sample_id = row["id"]
+            english_text = row["english"]
+            print(f"LLM Oracle Translation ({model_name}): {sample_id}")
+
+            response = generator(
+                _PROMPT,
+                inputs={"text": english_text},
+            )
+            content = response.content
+            print(content)
+            llm_oracle = _extract_oracle(content)
+
+            data["id"].append(sample_id)
+            data["llm_oracle"].append(llm_oracle)
+            data["latency_ms"].append(response.latency_ms)
+            data["input_tokens"].append(response.input_tokens)
+            data["output_tokens"].append(response.output_tokens)
+
+        results_df = pd.DataFrame(data)
+        results_df.to_csv(results_path, index=False)
+        results_by_model[model_name] = results_df
 
     if multiple_models:
         return results_by_model

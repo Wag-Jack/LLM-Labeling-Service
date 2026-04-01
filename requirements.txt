@@ -1,5 +1,6 @@
 assemblyai
 boto3
+azure-ai-inference
 datasets
 deepgram-sdk
 deepl

@@ -75,7 +75,9 @@ def run_speech_recognition(
     results: dict[str, pd.DataFrame] = {}
     for service_name in enabled_services:
         print(f"--- {service_name} ---")
-        module = import_module(f"service_invocations.speech_recognition.{service_name}")
+        module = import_module(
+            f"service_invocations.speech_recognition.services.{service_name}"
+        )
         runner = getattr(module, "run", None)
         if runner is None or not callable(runner):
             raise AttributeError(
@@ -110,6 +112,7 @@ def run_speech_recognition(
     else:
         print("--- Skipping WER (no speech service results) ---")
 
+    """
     if results:
         print("--- LLM Judging ---")
         judge_transcripts(
@@ -119,5 +122,6 @@ def run_speech_recognition(
             services_path=services_path,
             models_path=models_path,
         )
-
+    """
+        
     return results, oracle_results
