@@ -1,11 +1,13 @@
 speech_recognition:
   phi_4_multimodal_instruct:
-    enabled: true
+    enabled: false
   gemini_3_1_flash_lite_preview:
-    enabled: true
+    enabled: false
   gemini_2_5_pro:
+    enabled: false
+  gpt_realtime_1_5:
     enabled: true
-  amazon_nova_multimodal_embeddings:
+  gpt_realtime_mini:
     enabled: true
 
 language_translation:
@@ -15,5 +17,5 @@ language_translation:
     enabled: false
   gemini_2_5_pro:
     enabled: false
-  amazon_nova_multimodal_embeddings:
+  qwen_2_5_omni_7b:
     enabled: false

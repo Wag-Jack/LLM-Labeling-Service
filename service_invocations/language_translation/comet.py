@@ -1,26 +1,8 @@
 import pandas as pd
-import re
 
 from comet import download_model, load_from_checkpoint
 
-
-_ID_RE = re.compile(r"(\d+)$")
-
-
-def _normalize_id(value) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, (int, float)) and float(value).is_integer():
-        return f"{int(value):04d}"
-    value_str = str(value)
-    match = _ID_RE.search(value_str)
-    if match:
-        digits = match.group(1)
-        if len(digits) <= 4:
-            return digits.zfill(4)
-        return digits
-    return value_str
-
+from service_invocations.core.oracle_utils import normalize_id as _normalize_id
 
 def _build_outputs_by_service(results_by_service):
     outputs_by_service = {}

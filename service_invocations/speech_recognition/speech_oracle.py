@@ -5,6 +5,11 @@ import re
 import pandas as pd
 import yaml
 
+from service_invocations.core.oracle_utils import (
+    extract_oracle as _extract_oracle,
+    normalize_id as _normalize_id,
+)
+
 _PROMPT = """
 Please give me a transcript for the following audio file.
 You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.

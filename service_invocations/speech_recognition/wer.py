@@ -1,10 +1,11 @@
 import re
 import pandas as pd
 
+from service_invocations.core.oracle_utils import normalize_id as _normalize_id
+
 
 _NON_WORD_RE = re.compile(r"[^a-z0-9' ]+")
 _WS_RE = re.compile(r"\s+")
-_ID_RE = re.compile(r"(\d+)$")
 
 
 def _normalize_text(text):
@@ -16,21 +17,6 @@ def _normalize_text(text):
     if not text:
         return []
     return text.split(" ")
-
-
-def _normalize_id(value) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, (int, float)) and float(value).is_integer():
-        return f"{int(value):04d}"
-    value_str = str(value)
-    match = _ID_RE.search(value_str)
-    if match:
-        digits = match.group(1)
-        if len(digits) <= 4:
-            return digits.zfill(4)
-        return digits
-    return value_str
 
 
 def word_error_counts(reference, hypothesis):

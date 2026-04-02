@@ -6,6 +6,7 @@ deepgram-sdk
 deepl
 google-cloud-speech
 google-cloud-translate
+google-genai
 huggingface-hub
 ibm-watson
 numpy

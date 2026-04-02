@@ -1,10 +1,11 @@
 from importlib import import_module
-import json
 from pathlib import Path
 import re
 
 import pandas as pd
 import yaml
+
+from service_invocations.core.oracle_utils import extract_oracle as _extract_oracle
 
 _PROMPT = """
 Translate the following English text to French.
@@ -19,16 +20,6 @@ If you violate this, the output will be discarded.
 """
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
-
-
-def _extract_oracle(content: str) -> str:
-    try:
-        payload = json.loads(content)
-    except json.JSONDecodeError:
-        return "n/a"
-    if not isinstance(payload, dict):
-        return "n/a"
-    return payload.get("llm_oracle", "n/a")
 
 
 def _slugify_model(name: str) -> str:

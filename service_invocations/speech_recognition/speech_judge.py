@@ -8,24 +8,11 @@ import re
 import pandas as pd
 import yaml
 
+from service_invocations.core.oracle_utils import normalize_id as _normalize_id
 
 _RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition"
 _TASK_NAME = "speech_recognition"
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
-_ID_RE = re.compile(r"(\d+)$")
-
-
-def _normalize_id(value) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, (int, float)) and float(value).is_integer():
-        return f"{int(value):04d}"
-    value_str = str(value)
-    match = _ID_RE.search(value_str)
-    if match:
-        digits = match.group(1)
-        return digits.zfill(4) if len(digits) <= 4 else digits
-    return value_str
 
 
 def _slugify_model(name: str) -> str:
