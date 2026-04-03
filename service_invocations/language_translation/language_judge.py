@@ -7,7 +7,13 @@ from pathlib import Path
 
 load_dotenv
 
-_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "language_translation"  # Task-scoped outputs.
+_RESULTS_DIR = (
+    Path.cwd()
+    / "service_invocations"
+    / "results"
+    / "language_translation"
+    / "services"
+)  # Task-scoped outputs.
 
 def judge_translations(google_cloud, aws_translate, microsoft_translate, europarl_data):
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)

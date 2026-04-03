@@ -1,6 +1,6 @@
 models:
   phi_4_multimodal_instruct:
-    enabled: false
+    enabled: true
     provider: microsoft
     model_id: phi-4-multimodal-instruct
   gemini_3_1_flash_lite_preview:
@@ -12,10 +12,10 @@ models:
     provider: gemini
     model_id: gemini-2.5-pro
   gpt_realtime_1_5:
-    enabled: false
+    enabled: true
     provider: openai
     model_id: gpt-realtime-1.5
   gpt_realtime_mini:
-    enabled: false
+    enabled: true
     provider: openai
     model_id: gpt-realtime-mini

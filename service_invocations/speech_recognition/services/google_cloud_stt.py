@@ -5,7 +5,7 @@ from pathlib import Path
 import time
 
 # Results folder organized by task.
-_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition"  # Task-scoped outputs.
+_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition" / "services"  # Task-scoped outputs.
 RESULTS_FILE = "gc_stt.csv"
 
 # Helper function to deal with multiple transcript results from service

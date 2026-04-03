@@ -11,7 +11,13 @@ import yaml
 from service_invocations.core.oracle_utils import normalize_id as _normalize_id
 from service_invocations.models import get_model_generator
 
-_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition"
+_RESULTS_DIR = (
+    Path.cwd()
+    / "service_invocations"
+    / "results"
+    / "speech_recognition"
+    / "services"
+)
 _TASK_NAME = "speech_recognition"
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 

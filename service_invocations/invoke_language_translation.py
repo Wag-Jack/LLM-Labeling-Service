@@ -13,6 +13,9 @@ from service_invocations.language_translation.language_oracle import generate_or
 
 _TASK_NAME = "language_translation"
 _RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "language_translation"
+_SERVICES_DIR = _RESULTS_DIR / "services"
+_ORACLE_DIR = _RESULTS_DIR / "oracle"
+_COMET_DIR = _RESULTS_DIR / "comet"
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
@@ -67,9 +70,11 @@ def run_language_translation(
     enabled_services = _load_enabled_entries(services_path, _TASK_NAME)
     if not enabled_services:
         print("--- Skipping translation services (none enabled) ---")
-        return {}, None
 
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    _SERVICES_DIR.mkdir(parents=True, exist_ok=True)
+    _ORACLE_DIR.mkdir(parents=True, exist_ok=True)
+    _COMET_DIR.mkdir(parents=True, exist_ok=True)
 
     results: dict[str, pd.DataFrame] = {}
     for service_name in enabled_services:
@@ -87,7 +92,7 @@ def run_language_translation(
     print("--- LLM Oracle Translation ---")
     oracle_results = generate_oracle_translations(
         europarl_df,
-        results_dir=_RESULTS_DIR,
+        results_dir=_ORACLE_DIR,
         models_path=models_path,
     )
 
@@ -97,14 +102,14 @@ def run_language_translation(
             for model_name, model_oracle in oracle_results.items():
                 model_slug = _slugify_model(model_name)
                 comet_scores = compute_comet_scores(results, model_oracle, europarl_df)
-                comet_scores.to_csv(_RESULTS_DIR / f"comet_scores__{model_slug}.csv", index=False)
+                comet_scores.to_csv(_COMET_DIR / f"comet_scores__{model_slug}.csv", index=False)
                 comet_summary = compute_comet_summary(comet_scores, list(results.keys()))
-                comet_summary.to_csv(_RESULTS_DIR / f"comet_summary__{model_slug}.csv", index=False)
+                comet_summary.to_csv(_COMET_DIR / f"comet_summary__{model_slug}.csv", index=False)
         else:
             comet_scores = compute_comet_scores(results, oracle_results, europarl_df)
-            comet_scores.to_csv(_RESULTS_DIR / "comet_scores.csv", index=False)
+            comet_scores.to_csv(_COMET_DIR / "comet_scores.csv", index=False)
             comet_summary = compute_comet_summary(comet_scores, list(results.keys()))
-            comet_summary.to_csv(_RESULTS_DIR / "comet_summary.csv", index=False)
+            comet_summary.to_csv(_COMET_DIR / "comet_summary.csv", index=False)
     elif results:
         print("--- Skipping COMET (no LLM oracle results) ---")
     else:

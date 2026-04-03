@@ -9,7 +9,7 @@ import time as perf_time
 
 load_dotenv()
 
-_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition"  # Task-scoped outputs.
+_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition" / "services"  # Task-scoped outputs.
 RESULTS_FILE = "aws_stt.csv"
 
 S3_URI = "s3://llm-as-a-judge-edacc-storage"

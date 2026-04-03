@@ -33,7 +33,13 @@ def generate_oracle_translations(
     models_path: Path | None = None,
 ):
     if results_dir is None:
-        results_dir = Path.cwd() / "service_invocations" / "results" / "language_translation"
+        results_dir = (
+            Path.cwd()
+            / "service_invocations"
+            / "results"
+            / "language_translation"
+            / "oracle"
+        )
     if models_path is None:
         models_path = Path.cwd() / "config" / "models.yaml"
     results_dir.mkdir(parents=True, exist_ok=True)

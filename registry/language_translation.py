@@ -75,7 +75,13 @@ def run_translation_services(europarl_df, service_set: Iterable[dict], use_exist
                              service_registry: Dict[str, Dict[str, Any]] | None = None,
                              ) -> Dict[str, pd.DataFrame]:
     if results_dir is None:
-        results_dir = Path.cwd() / "service_invocations" / "results" / "language_translation"
+        results_dir = (
+            Path.cwd()
+            / "service_invocations"
+            / "results"
+            / "language_translation"
+            / "services"
+        )
     results_dir.mkdir(parents=True, exist_ok=True)
     if service_registry is None:
         service_registry = _load_service_registry(config_path)

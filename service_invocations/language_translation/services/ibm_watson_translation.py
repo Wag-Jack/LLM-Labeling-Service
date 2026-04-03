@@ -7,7 +7,7 @@ from pathlib import Path
 
 load_dotenv()
 
-_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "language_translation"  # Task-scoped outputs.
+_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "language_translation" / "services"  # Task-scoped outputs.
 
 
 def run_ibm_watson_translation(europarl_data, results_path: Path | None = None):

@@ -7,7 +7,7 @@ import time
 
 load_dotenv()
 
-_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition"  # Task-scoped outputs.
+_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition" / "services"  # Task-scoped outputs.
 RESULTS_FILE = "aa_stt.csv"
 
 def run_assemblyai(edacc_data):

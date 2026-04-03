@@ -10,7 +10,7 @@ from speechmatics.batch import AsyncClient, JobConfig, JobType, TranscriptionCon
 
 load_dotenv()
 
-_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition"  # Task-scoped outputs.
+_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition" / "services"  # Task-scoped outputs.
 RESULTS_FILE = "speechmatics_stt.csv"
 # Runs in the main project environment (no provider-specific venv required).
 

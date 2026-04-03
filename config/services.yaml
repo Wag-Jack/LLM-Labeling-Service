@@ -2,7 +2,7 @@ speech_recognition:
   google_cloud_stt:
     enabled: false
   assemblyai:
-    enabled: true
+    enabled: false 
   aws_transcribe:
     enabled: false
   ibm_watson_stt:
@@ -20,4 +20,12 @@ language_translation:
   microsoft_translator:
     enabled: false
   deepl_translation:
+    enabled: false
+
+emotion_detection:
+  google_cloud_vision:
+    enabled: false
+  aws_rekognition:
+    enabled: false
+  microsoft_azure_face:
     enabled: false

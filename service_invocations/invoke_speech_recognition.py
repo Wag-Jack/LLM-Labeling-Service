@@ -14,6 +14,9 @@ from service_invocations.speech_recognition.wer import compute_wer_counts, compu
 
 _TASK_NAME = "speech_recognition"
 _RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition"
+_SERVICES_DIR = _RESULTS_DIR / "services"
+_ORACLE_DIR = _RESULTS_DIR / "oracle"
+_WER_DIR = _RESULTS_DIR / "wer"
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
@@ -68,9 +71,11 @@ def run_speech_recognition(
     enabled_services = _load_enabled_entries(services_path, _TASK_NAME)
     if not enabled_services:
         print("--- Skipping speech services (none enabled) ---")
-        return {}, None
 
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    _SERVICES_DIR.mkdir(parents=True, exist_ok=True)
+    _ORACLE_DIR.mkdir(parents=True, exist_ok=True)
+    _WER_DIR.mkdir(parents=True, exist_ok=True)
 
     results: dict[str, pd.DataFrame] = {}
     for service_name in enabled_services:
@@ -88,7 +93,7 @@ def run_speech_recognition(
     print("--- LLMaaS ---")
     oracle_results = generate_oracle_transcripts(
         edacc_df,
-        results_dir=_RESULTS_DIR,
+        results_dir=_ORACLE_DIR,
         models_path=models_path,
     )
 
@@ -98,14 +103,14 @@ def run_speech_recognition(
             for model_name, model_oracle in oracle_results.items():
                 model_slug = _slugify_model(model_name)
                 wer_counts = compute_wer_counts(results, model_oracle, edacc_df)
-                wer_counts.to_csv(_RESULTS_DIR / f"wer_counts__{model_slug}.csv", index=False)
+                wer_counts.to_csv(_WER_DIR / f"wer_counts__{model_slug}.csv", index=False)
                 wer_summary = compute_wer_summary(wer_counts, list(results.keys()))
-                wer_summary.to_csv(_RESULTS_DIR / f"wer_summary__{model_slug}.csv", index=False)
+                wer_summary.to_csv(_WER_DIR / f"wer_summary__{model_slug}.csv", index=False)
         else:
             wer_counts = compute_wer_counts(results, oracle_results, edacc_df)
-            wer_counts.to_csv(_RESULTS_DIR / "wer_counts.csv", index=False)
+            wer_counts.to_csv(_WER_DIR / "wer_counts.csv", index=False)
             wer_summary = compute_wer_summary(wer_counts, list(results.keys()))
-            wer_summary.to_csv(_RESULTS_DIR / "wer_summary.csv", index=False)
+            wer_summary.to_csv(_WER_DIR / "wer_summary.csv", index=False)
     elif results:
         print("--- Skipping WER (no LLM oracle results) ---")
     else:
@@ -117,7 +122,7 @@ def run_speech_recognition(
         judge_transcripts(
             results,
             edacc_df,
-            results_dir=_RESULTS_DIR,
+            results_dir=_SERVICES_DIR,
             services_path=services_path,
             models_path=models_path,
         )

@@ -36,7 +36,13 @@ def generate_oracle_transcripts(
     models_path: Path | None = None,
 ):
     if results_dir is None:
-        results_dir = Path.cwd() / "service_invocations" / "results" / "speech_recognition"
+        results_dir = (
+            Path.cwd()
+            / "service_invocations"
+            / "results"
+            / "speech_recognition"
+            / "oracle"
+        )
     if models_path is None:
         models_path = Path.cwd() / "config" / "models.yaml"
     results_dir.mkdir(parents=True, exist_ok=True)
