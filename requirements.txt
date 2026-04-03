@@ -20,3 +20,4 @@ torch
 torchaudio
 torchcodec
 unbabel-comet==2.2.7
+websocket-client

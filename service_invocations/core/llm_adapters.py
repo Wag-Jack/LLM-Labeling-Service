@@ -80,12 +80,43 @@ def _build_openai_messages(prompt: str, inputs: Dict[str, Any]) -> List[Dict[str
     return [{"role": "user", "content": content}]
 
 
+def _is_realtime_model(model: str) -> bool:
+    return "realtime" in (model or "").lower()
+
+
+def _extract_realtime_text(response: Dict[str, Any] | None) -> str:
+    if not isinstance(response, dict):
+        return ""
+    output = response.get("output")
+    if not isinstance(output, list):
+        return ""
+    chunks: List[str] = []
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+        content = item.get("content")
+        if isinstance(content, list):
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                if part.get("type") in ("output_text", "text"):
+                    text = part.get("text")
+                    if text:
+                        chunks.append(text)
+        text = item.get("text")
+        if text:
+            chunks.append(text)
+    return "".join(chunks).strip()
+
+
 class OpenAIAdapter:
     def __init__(self) -> None:
         self._client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
     def generate(self, model: str, prompt: str, inputs: Dict[str, Any],
                  modalities: List[str]) -> LLMResponse:
+        if _is_realtime_model(model):
+            return self._generate_realtime(model, prompt, inputs)
         messages = _build_openai_messages(prompt, inputs)
         start_time = time.perf_counter()
         response = self._client.chat.completions.create(
@@ -109,6 +140,85 @@ class OpenAIAdapter:
             latency_ms=round(latency_ms, 2),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+        )
+
+    def _generate_realtime(self, model: str, prompt: str, inputs: Dict[str, Any]) -> LLMResponse:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise UnsupportedProviderError(
+                "OpenAI adapter requires OPENAI_API_KEY for realtime connections."
+            )
+        try:
+            import websocket  # type: ignore
+        except Exception as exc:  # pragma: no cover - import guard
+            raise UnsupportedProviderError(
+                "Realtime OpenAI connections require the websocket-client package."
+            ) from exc
+
+        url = f"wss://api.openai.com/v1/realtime?model={model}"
+        headers = [f"Authorization: Bearer {api_key}"]
+
+        ws = websocket.WebSocket()
+        start_time = time.perf_counter()
+        ws.connect(url, header=headers)
+
+        try:
+            payload_inputs = inputs or {}
+            content_parts: List[Dict[str, Any]] = []
+            text_input = payload_inputs.get("text")
+            if text_input:
+                content_parts.append({"type": "input_text", "text": text_input})
+
+            audio_input = payload_inputs.get("audio")
+            if audio_input is not None:
+                audio_bytes = _read_bytes(audio_input)
+                audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+                content_parts.append({"type": "input_audio", "audio": audio_b64})
+
+            image_input = payload_inputs.get("image")
+            if image_input is not None:
+                image_bytes = _read_bytes(image_input)
+                image_format = payload_inputs.get("image_format") or _infer_format(image_input, "png")
+                image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+                content_parts.append({
+                    "type": "input_image",
+                    "image_url": f"data:image/{image_format};base64,{image_b64}",
+                })
+
+            if content_parts:
+                ws.send(json.dumps({
+                    "type": "conversation.item.create",
+                    "item": {
+                        "type": "message",
+                        "role": "user",
+                        "content": content_parts,
+                    },
+                }))
+
+            ws.send(json.dumps({
+                "type": "response.create",
+                "response": {
+                    "output_modalities": ["text"],
+                    "instructions": prompt,
+                },
+            }))
+
+            content = ""
+            while True:
+                raw = ws.recv()
+                event = json.loads(raw)
+                if event.get("type") == "response.done":
+                    content = _extract_realtime_text(event.get("response"))
+                    break
+        finally:
+            ws.close()
+
+        latency_ms = (time.perf_counter() - start_time) * 1000.0
+        return LLMResponse(
+            content=content,
+            latency_ms=round(latency_ms, 2),
+            input_tokens=None,
+            output_tokens=None,
         )
 
 
@@ -148,7 +258,7 @@ class GeminiAdapter:
                  modalities: List[str]) -> LLMResponse:
         start_time = time.perf_counter()
         if self._mode == "genai":
-            parts = [self._types.Part.from_text(prompt)]
+            parts = [self._types.Part.from_text(text=prompt)]
             text_input = inputs.get("text")
             if text_input:
                 parts.append(self._types.Part.from_text(text_input))
@@ -215,82 +325,6 @@ class GeminiAdapter:
             latency_ms=round(latency_ms, 2),
             input_tokens=None,
             output_tokens=None,
-        )
-
-
-class MicrosoftPhiAdapter:
-    def __init__(self) -> None:
-        api_key = os.getenv("MICROSOFT_PHI_KEY")
-        if not api_key:
-            raise UnsupportedProviderError(
-                "Microsoft Phi adapter requires MICROSOFT_PHI_KEY."
-            )
-        target_uri = os.getenv("PHI_TARGET_URI")
-        if not target_uri:
-            raise UnsupportedProviderError(
-                "Microsoft Phi adapter requires PHI_TARGET_URI."
-            )
-        self._api_key = api_key
-        self._target_uri = target_uri
-
-    def _post_json(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        data = json.dumps(payload).encode("utf-8")
-        headers = {
-            "Content-Type": "application/json",
-            "api-key": self._api_key,
-        }
-        req = url_request.Request(
-            self._target_uri,
-            data=data,
-            headers=headers,
-            method="POST",
-        )
-        try:
-            with url_request.urlopen(req) as resp:
-                body = resp.read()
-        except url_error.HTTPError as exc:
-            body = exc.read()
-            detail = body.decode("utf-8", errors="replace")
-            raise RuntimeError(
-                f"Microsoft Phi request failed: HTTP {exc.code} {exc.reason} - {detail}"
-            ) from exc
-        return json.loads(body.decode("utf-8"))
-
-    def generate(self, model: str, prompt: str, inputs: Dict[str, Any],
-                 modalities: List[str]) -> LLMResponse:
-        messages = _build_openai_messages(prompt, inputs)
-        start_time = time.perf_counter()
-        payload: Dict[str, Any] = {
-            "model": model,
-            "messages": messages,
-        }
-        response = self._post_json(payload)
-        latency_ms = (time.perf_counter() - start_time) * 1000.0
-        usage = response.get("usage") if isinstance(response, dict) else None
-        input_tokens = None
-        output_tokens = None
-        prompt_tokens = None
-        completion_tokens = None
-        if isinstance(usage, dict):
-            input_tokens = usage.get("input_tokens")
-            output_tokens = usage.get("output_tokens")
-            prompt_tokens = usage.get("prompt_tokens")
-            completion_tokens = usage.get("completion_tokens")
-        if input_tokens is None:
-            input_tokens = prompt_tokens
-        if output_tokens is None:
-            output_tokens = completion_tokens
-        content = ""
-        if isinstance(response, dict):
-            choices = response.get("choices") or []
-            if choices:
-                message = choices[0].get("message", {})
-                content = message.get("content", "")
-        return LLMResponse(
-            content=content,
-            latency_ms=round(latency_ms, 2),
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
         )
 
 

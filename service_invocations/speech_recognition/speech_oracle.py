@@ -1,14 +1,13 @@
-from importlib import import_module
 from pathlib import Path
 import re
 
 import pandas as pd
-import yaml
 
 from service_invocations.core.oracle_utils import (
     extract_oracle as _extract_oracle,
     normalize_id as _normalize_id,
 )
+from service_invocations.models import get_enabled_models, get_model_generator
 
 _PROMPT = """
 Please give me a transcript for the following audio file.
@@ -30,31 +29,11 @@ def _slugify_model(name: str) -> str:
     return slug or "model"
 
 
-def _load_enabled_models(models_path: Path, task_name: str) -> list[str]:
-    if not models_path.exists():
-        raise FileNotFoundError(f"Models config not found: {models_path}")
-    with models_path.open("r", encoding="utf-8") as f:
-        config = yaml.safe_load(f) or {}
-    if not isinstance(config, dict):
-        raise ValueError("models.yaml root must be a mapping.")
-
-    task_cfg = config.get(task_name, {})
-    if not isinstance(task_cfg, dict):
-        raise ValueError(f"models.yaml '{task_name}' must be a mapping.")
-
-    enabled = []
-    for name, entry in task_cfg.items():
-        if isinstance(entry, dict) and entry.get("enabled", False):
-            enabled.append(name)
-    return enabled
-
-
 def generate_oracle_transcripts(
     edacc_data,
     use_existing: bool = False,
     results_dir: Path | None = None,
     models_path: Path | None = None,
-    task_name: str = "speech_recognition",
 ):
     if results_dir is None:
         results_dir = Path.cwd() / "service_invocations" / "results" / "speech_recognition"
@@ -62,7 +41,7 @@ def generate_oracle_transcripts(
         models_path = Path.cwd() / "config" / "models.yaml"
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    enabled_models = _load_enabled_models(models_path, task_name)
+    enabled_models = get_enabled_models(models_path)
     if not enabled_models:
         print("Skipping LLM Oracle Transcript (no enabled models).")
         return {}
@@ -80,12 +59,7 @@ def generate_oracle_transcripts(
             results_by_model[model_name] = pd.read_csv(results_path)
             continue
 
-        module = import_module(f"service_invocations.models.{model_name}")
-        generator = getattr(module, "generate", None)
-        if generator is None or not callable(generator):
-            raise AttributeError(
-                f"Model script '{model_name}' must define a generate(...) function."
-            )
+        generator = get_model_generator(model_name, models_path=models_path)
 
         data = {
             "id": [],

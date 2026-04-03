@@ -89,7 +89,6 @@ def run_language_translation(
         europarl_df,
         results_dir=_RESULTS_DIR,
         models_path=models_path,
-        task_name=_TASK_NAME,
     )
 
     if results and _has_oracle_results(oracle_results):

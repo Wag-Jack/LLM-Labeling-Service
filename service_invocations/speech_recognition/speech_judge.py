@@ -9,6 +9,7 @@ import pandas as pd
 import yaml
 
 from service_invocations.core.oracle_utils import normalize_id as _normalize_id
+from service_invocations.models import get_model_generator
 
 _RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition"
 _TASK_NAME = "speech_recognition"
@@ -98,12 +99,7 @@ Service transcripts:
 """
 
     for model_name in enabled_models:
-        module = import_module(f"service_invocations.models.{model_name}")
-        generator = getattr(module, "generate", None)
-        if generator is None or not callable(generator):
-            raise AttributeError(
-                f"Model script '{model_name}' must define a generate(...) function."
-            )
+        generator = get_model_generator(model_name, models_path=models_path)
 
         model_slug = _slugify_model(model_name)
         score_column = "llm_judge_score" if len(enabled_models) == 1 else f"llm_judge_score__{model_slug}"

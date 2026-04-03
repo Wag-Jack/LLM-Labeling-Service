@@ -90,7 +90,6 @@ def run_speech_recognition(
         edacc_df,
         results_dir=_RESULTS_DIR,
         models_path=models_path,
-        task_name=_TASK_NAME,
     )
 
     if results and _has_oracle_results(oracle_results):

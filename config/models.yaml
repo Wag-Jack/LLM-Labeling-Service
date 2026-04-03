@@ -1,21 +1,21 @@
-speech_recognition:
+models:
   phi_4_multimodal_instruct:
     enabled: false
+    provider: microsoft
+    model_id: phi-4-multimodal-instruct
   gemini_3_1_flash_lite_preview:
-    enabled: false
+    enabled: true
+    provider: gemini
+    model_id: gemini-3.1-flash-lite-preview
   gemini_2_5_pro:
-    enabled: false
+    enabled: true
+    provider: gemini
+    model_id: gemini-2.5-pro
   gpt_realtime_1_5:
-    enabled: true
+    enabled: false
+    provider: openai
+    model_id: gpt-realtime-1.5
   gpt_realtime_mini:
-    enabled: true
-
-language_translation:
-  phi_4_multimodal_instruct:
     enabled: false
-  gemini_3_1_flash_lite_preview:
-    enabled: false
-  gemini_2_5_pro:
-    enabled: false
-  qwen_2_5_omni_7b:
-    enabled: false
+    provider: openai
+    model_id: gpt-realtime-mini
