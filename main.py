@@ -6,15 +6,15 @@ from data_management.en_fr import load_en_fr
 from data_management.vea import load_vea
 
 # Amount of samples from each dataset to run through services
-NUM_SAMPLES = 5
+NUM_SAMPLES = 3
 
 def main():
     while True:
         command = input(
             "LLM as a Judge\n"
-            "1.) Speech Recognition\n"
-            "2.) Emotion Detection\n"
-            "3.) Language Translation\n"
+            "1.) ASR - Automatic Speech Recognition\n"
+            "2.) FER - Facial Emotion Detection\n"
+            "3.) MT - Machine Translation\n"
             "4.) Exit\n"
             "Select: "
         )
@@ -26,6 +26,7 @@ def main():
                     edacc_df = load_edacc(NUM_SAMPLES)
                     run_speech_recognition(edacc_df)
                 case 2:
+                    print("--- Retrieving Visual Emotional Analysis samples ---")
                     vea_df = load_vea(NUM_SAMPLES)
                     run_emotion_detection(vea_df)
                 case 3:

@@ -9,6 +9,7 @@ google-cloud-translate
 google-genai
 huggingface-hub
 ibm-watson
+modernmt
 numpy
 openai
 pandas
