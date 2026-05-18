@@ -1,5 +1,5 @@
 import os
-import time as perf_time
+import time
 from pathlib import Path
 
 import boto3
@@ -7,10 +7,9 @@ from dotenv import load_dotenv
 import pandas as pd
 
 from service_invocations.emotion_detection.services._shared import (
-    format_service_output,
+    build_service_output,
     label_to_name,
     normalize_emotions,
-    pick_top_emotion,
 )
 
 load_dotenv()
@@ -24,6 +23,8 @@ _RESULTS_DIR = (
 )
 RESULTS_FILE = "aws_rekognition.csv"
 
+# Rekognition returns "CALM" and "CONFUSED" which have no direct VEA
+# counterpart; both map to "neutral" for cross-service comparison.
 _EMOTION_MAPPING = {
     "angry": "anger",
     "calm": "neutral",
@@ -40,15 +41,13 @@ def _extract_emotions(response: dict) -> dict[str, float | None]:
     faces = response.get("FaceDetails", [])
     if not faces:
         return {}
-    emotions = faces[0].get("Emotions", [])
-    scores = {}
-    for entry in emotions:
+    scores: dict[str, float | None] = {}
+    for entry in faces[0].get("Emotions", []):
         raw_type = str(entry.get("Type", "")).lower()
-        score = entry.get("Confidence")
-        if score is None:
-            scores[raw_type] = None
-        else:
-            scores[raw_type] = float(score) / 100.0
+        confidence = entry.get("Confidence")
+        # Rekognition reports confidence on a 0-100 scale; rescale to 0-1
+        # so all FER providers share the same numeric range.
+        scores[raw_type] = None if confidence is None else float(confidence) / 100.0
     return scores
 
 
@@ -66,12 +65,10 @@ def run_aws_rekognition(vea_data, results_path: Path | None = None):
 
     data = {
         "id": [],
-        "image_file": [],
         "label": [],
         "label_name": [],
-        "service_output": [],
-        "top_emotion": [],
         "latency_ms": [],
+        "service_output": [],
     }
 
     for _, row in vea_data.iterrows():
@@ -80,35 +77,30 @@ def run_aws_rekognition(vea_data, results_path: Path | None = None):
         label = row.get("label")
         print(f"AWS Rekognition: {image_file}")
 
+        latency_ms: float | None = None
+        error: str | None = None
+        normalized: dict[str, float | None] = {}
+
         try:
             with open(image_file, "rb") as f:
                 image_bytes = f.read()
 
-            start_time = perf_time.perf_counter()
+            start_time = time.perf_counter()
             response = client.detect_faces(
                 Image={"Bytes": image_bytes},
                 Attributes=["EMOTIONS"],
             )
-            latency_ms = (perf_time.perf_counter() - start_time) * 1000.0
+            latency_ms = (time.perf_counter() - start_time) * 1000.0
             raw_scores = _extract_emotions(response)
             normalized = normalize_emotions(raw_scores, mapping=_EMOTION_MAPPING)
-            top_emotion = pick_top_emotion(normalized)
-            output = format_service_output(response, normalized)
         except Exception as exc:  # noqa: BLE001
-            latency_ms = None
-            normalized = {}
-            top_emotion = None
-            output = format_service_output({"error": str(exc)}, normalized)
+            error = str(exc)
 
         data["id"].append(f"aws_rekognition_{sample_id:04d}")
-        data["image_file"].append(image_file)
         data["label"].append(label)
         data["label_name"].append(label_to_name(label))
-        data["service_output"].append(output)
-        data["top_emotion"].append(top_emotion)
         data["latency_ms"].append(None if latency_ms is None else round(latency_ms, 2))
-
-    data["llm_judge_score"] = [0.0 for _ in data["id"]]
+        data["service_output"].append(build_service_output(normalized, error=error))
 
     df = pd.DataFrame(data)
     df.to_csv(results_path, index=False)

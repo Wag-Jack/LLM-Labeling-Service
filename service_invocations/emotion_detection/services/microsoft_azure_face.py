@@ -1,5 +1,5 @@
 import os
-import time as perf_time
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -7,10 +7,9 @@ import pandas as pd
 import requests
 
 from service_invocations.emotion_detection.services._shared import (
-    format_service_output,
+    build_service_output,
     label_to_name,
     normalize_emotions,
-    pick_top_emotion,
 )
 
 load_dotenv()
@@ -24,6 +23,9 @@ _RESULTS_DIR = (
 )
 RESULTS_FILE = "microsoft_azure_face.csv"
 
+# Azure Face returns probability-like scores in [0, 1] that already sum
+# to ~1 across the eight emotions, so values are directly comparable
+# with other services on the same scale.
 _EMOTION_MAPPING = {
     "anger": "anger",
     "contempt": "contempt",
@@ -62,12 +64,10 @@ def run_microsoft_azure_face(vea_data, results_path: Path | None = None):
 
     data = {
         "id": [],
-        "image_file": [],
         "label": [],
         "label_name": [],
-        "service_output": [],
-        "top_emotion": [],
         "latency_ms": [],
+        "service_output": [],
     }
 
     for _, row in vea_data.iterrows():
@@ -76,17 +76,19 @@ def run_microsoft_azure_face(vea_data, results_path: Path | None = None):
         label = row.get("label")
         print(f"Microsoft Azure Face API: {image_file}")
 
-        params = {
-            "returnFaceAttributes": return_attrs,
-        }
+        params = {"returnFaceAttributes": return_attrs}
         if detection_model:
             params["detectionModel"] = detection_model
+
+        latency_ms: float | None = None
+        error: str | None = None
+        normalized: dict[str, float | None] = {}
 
         try:
             with open(image_file, "rb") as f:
                 image_bytes = f.read()
 
-            start_time = perf_time.perf_counter()
+            start_time = time.perf_counter()
             response = requests.post(
                 endpoint,
                 params=params,
@@ -97,30 +99,20 @@ def run_microsoft_azure_face(vea_data, results_path: Path | None = None):
                 data=image_bytes,
                 timeout=30,
             )
-            latency_ms = (perf_time.perf_counter() - start_time) * 1000.0
+            latency_ms = (time.perf_counter() - start_time) * 1000.0
             response.raise_for_status()
             response_json = response.json()
-
             face = response_json[0] if response_json else {}
             raw_scores = face.get("faceAttributes", {}).get("emotion", {})
             normalized = normalize_emotions(raw_scores, mapping=_EMOTION_MAPPING)
-            top_emotion = pick_top_emotion(normalized)
-            output = format_service_output(response_json, normalized)
         except Exception as exc:  # noqa: BLE001
-            latency_ms = None
-            normalized = {}
-            top_emotion = None
-            output = format_service_output({"error": str(exc)}, normalized)
+            error = str(exc)
 
         data["id"].append(f"microsoft_azure_face_{sample_id:04d}")
-        data["image_file"].append(image_file)
         data["label"].append(label)
         data["label_name"].append(label_to_name(label))
-        data["service_output"].append(output)
-        data["top_emotion"].append(top_emotion)
         data["latency_ms"].append(None if latency_ms is None else round(latency_ms, 2))
-
-    data["llm_judge_score"] = [0.0 for _ in data["id"]]
+        data["service_output"].append(build_service_output(normalized, error=error))
 
     df = pd.DataFrame(data)
     df.to_csv(results_path, index=False)

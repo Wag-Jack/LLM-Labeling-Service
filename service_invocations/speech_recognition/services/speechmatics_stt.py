@@ -1,18 +1,18 @@
 import asyncio
-from dotenv import load_dotenv
 import os
-import pandas as pd
-from pathlib import Path
 import re
 import time
+from pathlib import Path
+
+from dotenv import load_dotenv
+import pandas as pd
 
 from speechmatics.batch import AsyncClient, JobConfig, JobType, TranscriptionConfig
 
 load_dotenv()
 
-_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition" / "services"  # Task-scoped outputs.
+_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition" / "services"
 RESULTS_FILE = "speechmatics_stt.csv"
-# Runs in the main project environment (no provider-specific venv required).
 
 _SPEAKER_PREFIX_RE = re.compile(r"^SPEAKER\s+[^:]+:\s*", re.IGNORECASE | re.MULTILINE)
 
@@ -20,12 +20,10 @@ _SPEAKER_PREFIX_RE = re.compile(r"^SPEAKER\s+[^:]+:\s*", re.IGNORECASE | re.MULT
 def _clean_transcript(text: str) -> str:
     if not text:
         return ""
-    cleaned = _SPEAKER_PREFIX_RE.sub("", text)
-    return cleaned.strip()
+    return _SPEAKER_PREFIX_RE.sub("", text).strip()
 
 
 def _extract_transcript(result) -> str:
-    # speechmatics-batch returns a result object with transcript_text; fall back to dict access.
     if hasattr(result, "transcript_text"):
         return _clean_transcript(result.transcript_text or "")
     if isinstance(result, dict):
@@ -58,32 +56,31 @@ def run_speechmatics_stt(edacc_data, results_path: Path | None = None):
     if results_path is None:
         results_path = _RESULTS_DIR / RESULTS_FILE
 
-    api_key = os.getenv("SPEECHMATICS_API_KEY")
-    if not api_key:
+    if not os.getenv("SPEECHMATICS_API_KEY"):
         raise ValueError("SPEECHMATICS_API_KEY must be set in environment.")
 
     transcripts = asyncio.run(_transcribe_all(edacc_data))
 
     data = {
         "id": [],
-        "wav_file": [],
         "service_output": [],
         "latency_ms": [],
+        "wav_file": [],
     }
 
     for (_, row), (transcript, latency_ms) in zip(edacc_data.iterrows(), transcripts):
         sample_id = row["id"]
         audio_file = row["audio"]
         data["id"].append(f"speechmatics_stt_{sample_id:04d}")
-        data["wav_file"].append(audio_file)
         data["service_output"].append(transcript)
         data["latency_ms"].append(round(latency_ms, 2))
+        data["wav_file"].append(audio_file)
 
     data["llm_judge_score"] = [0.0 for _ in data["id"]]
 
-    sm_df = pd.DataFrame(data)
-    sm_df.to_csv(results_path, index=False)
-    return sm_df
+    df = pd.DataFrame(data, columns=["id", "service_output", "latency_ms", "llm_judge_score", "wav_file"])
+    df.to_csv(results_path, index=False)
+    return df
 
 
 def run(edacc_data):
