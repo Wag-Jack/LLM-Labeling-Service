@@ -1,41 +1,39 @@
 speech_recognition:
   google_cloud_stt:
-    enabled: false
+    enabled: true
   assemblyai:
-    enabled: false 
+    enabled: true
   aws_transcribe:
-    enabled: false
+    enabled: true
   ibm_watson_stt:
-    enabled: false
+    enabled: true
   speechmatics_stt:
-    enabled: false
+    enabled: true
   deepgram_stt:
-    enabled: false
+    enabled: true
 
 language_translation:
   google_cloud_translation:
-    enabled: false
+    enabled: true
   aws_translate:
-    enabled: false
+    enabled: true
   microsoft_translator:
-    enabled: false
+    enabled: true
   deepl_translation:
+    enabled: true
+  ibm_watson_translator:
     enabled: false
+  modern_mt:
+    enabled: true
 
 emotion_detection:
-  google_cloud_vision:
-    enabled: false
-  aws_rekognition:
-    enabled: false
-  microsoft_azure_face:
-    enabled: false
   faceplusplus:
     enabled: true
-  kairos:
+  microsoft_azure_face:
+    enabled: false
+  aws_rekognition:
     enabled: true
+  smartclick:
+    enabled: false
   luxand_facesdk:
-    enabled: true
-  sightengine_emotion:
-    enabled: true
-  affectiva:
     enabled: true

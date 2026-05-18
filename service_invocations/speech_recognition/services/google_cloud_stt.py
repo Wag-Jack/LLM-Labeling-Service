@@ -1,67 +1,81 @@
+import os
+import time
+from pathlib import Path
+
+from dotenv import load_dotenv
 from google.oauth2 import service_account
 from google.cloud import speech
 import pandas as pd
-from pathlib import Path
-import time
 
-# Results folder organized by task.
-_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition" / "services"  # Task-scoped outputs.
+load_dotenv()
+
+_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition" / "services"
 RESULTS_FILE = "gc_stt.csv"
 
-# Helper function to deal with multiple transcript results from service
-def combine_response(response_json):
-    combined_transcript = ""
-    for result in response_json.results:
-        combined_transcript += result.alternatives[0].transcript + " "
-    return combined_transcript.strip()
 
-def run_gc_stt(edacc_data):
+def _resolve_credentials_path() -> Path:
+    env_path = os.getenv("GOOGLE_STT_CREDENTIALS") or os.getenv(
+        "GOOGLE_APPLICATION_CREDENTIALS"
+    )
+    if env_path:
+        return Path(env_path)
+    return Path.cwd() / "credentials" / "speech_recognition" / "llm-as-a-judge_gc.json"
+
+
+def _combine_response(response) -> str:
+    parts = []
+    for result in response.results:
+        if result.alternatives:
+            parts.append(result.alternatives[0].transcript)
+    return " ".join(part.strip() for part in parts if part).strip()
+
+
+def run_gc_stt(edacc_data, results_path: Path | None = None):
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    # Grab secret key from credentials to tap into Google Cloud Speech-to-Text API
-    cred_path = Path.cwd() / 'credentials'
-    client_file = cred_path / 'speech_recognition/llm-as-a-judge_gc.json'
-    credentials = service_account.Credentials.from_service_account_file(client_file)
+    if results_path is None:
+        results_path = _RESULTS_DIR / RESULTS_FILE
+
+    credentials = service_account.Credentials.from_service_account_file(
+        _resolve_credentials_path()
+    )
     client = speech.SpeechClient(credentials=credentials)
-    
+    config = speech.RecognitionConfig(
+        encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+        language_code="en-US",
+    )
+
     data = {
         "id": [],
-        "wav_file": [],
         "service_output": [],
         "latency_ms": [],
+        "wav_file": [],
     }
 
     for _, row in edacc_data.iterrows():
-        # Run the service on the selected file
         audio_file = row["audio"]
+        sample_id = row["id"]
         print(f"Google Cloud STT: {audio_file}")
-        with open(audio_file, 'rb') as f:
+
+        with open(audio_file, "rb") as f:
             audio_bytes = f.read()
         audio = speech.RecognitionAudio(content=audio_bytes)
-        config = speech.RecognitionConfig(
-            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-            language_code="en-US"
-        )
 
         start_time = time.perf_counter()
         response = client.recognize(config=config, audio=audio)
         latency_ms = (time.perf_counter() - start_time) * 1000.0
+        transcript = _combine_response(response)
+        print(transcript)
 
-        data["id"].append(f"gc_stt_{row['id']:04d}")
-        data["wav_file"].append(row["audio"])
+        data["id"].append(f"gc_stt_{sample_id:04d}")
+        data["service_output"].append(transcript)
         data["latency_ms"].append(round(latency_ms, 2))
-        
-        formatted_response = combine_response(response)
-        print(formatted_response, end='\n')
-        
-        data["service_output"].append(formatted_response)
+        data["wav_file"].append(audio_file)
 
-    # Add in blank column for LLM judge score
-    data["llm_judge_score"] = [0.0 for r in data["id"]]
+    data["llm_judge_score"] = [0.0 for _ in data["id"]]
 
-    # Convert into DataFrame and save to CSV
-    gc_stt_df = pd.DataFrame(data)
-    gc_stt_df.to_csv(_RESULTS_DIR / RESULTS_FILE, index=False)
-    return gc_stt_df
+    df = pd.DataFrame(data, columns=["id", "service_output", "latency_ms", "llm_judge_score", "wav_file"])
+    df.to_csv(results_path, index=False)
+    return df
 
 
 def run(edacc_data):
