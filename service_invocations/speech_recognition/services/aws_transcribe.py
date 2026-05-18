@@ -1,96 +1,93 @@
+import os
+import time
+from pathlib import Path
+
 import boto3
 from dotenv import load_dotenv
-import os
 import pandas as pd
-from pathlib import Path
 import requests
-from time import time
-import time as perf_time
 
 load_dotenv()
 
-_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition" / "services"  # Task-scoped outputs.
+_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition" / "services"
 RESULTS_FILE = "aws_stt.csv"
 
-S3_URI = "s3://llm-as-a-judge-edacc-storage"
+S3_URI = os.getenv("AWS_S3_AUDIO_URI", "s3://llm-as-a-judge-edacc-storage")
+S3_AUDIO_PREFIX = os.getenv("AWS_S3_PREFIX", "edacc/audio")
 
-# Start the transcription job for specific audio files
-# Exceptions for job handling: botocore.errorfactory.ConflictException -> job already running, run while loop until job cancelled
-def start_transcription_job(id, transcribe):
-    transcript_job_name = f"{id:04d}_job-{int(time())}"
-    response = transcribe.start_transcription_job(
-        TranscriptionJobName=transcript_job_name,
-        Media={"MediaFileUri": f"{S3_URI}/edacc/audio/{id:04d}.wav"},
+
+def _start_transcription_job(sample_id: int, transcribe) -> str:
+    job_name = f"{int(sample_id):04d}_job-{int(time.time())}"
+    transcribe.start_transcription_job(
+        TranscriptionJobName=job_name,
+        Media={"MediaFileUri": f"{S3_URI}/{S3_AUDIO_PREFIX}/{int(sample_id):04d}.wav"},
         MediaFormat="wav",
-        LanguageCode="en-US"
+        LanguageCode="en-US",
     )
+    return job_name
 
-    return transcript_job_name
 
-# Poll for the transcription job to complete
-def wait_for_job(job_name, transcribe):
+def _wait_for_job(job_name: str, transcribe) -> str | None:
     while True:
         response = transcribe.get_transcription_job(TranscriptionJobName=job_name)
-        status = response['TranscriptionJob']['TranscriptionJobStatus']
-        if status == 'COMPLETED':
-            uri = response['TranscriptionJob']['Transcript']['TranscriptFileUri']
+        status = response["TranscriptionJob"]["TranscriptionJobStatus"]
+        if status == "COMPLETED":
+            uri = response["TranscriptionJob"]["Transcript"]["TranscriptFileUri"]
             transcribe.delete_transcription_job(TranscriptionJobName=job_name)
             return uri
-        elif status == 'FAILED':
+        if status == "FAILED":
             return None
-        
-# Method to extract the transcript from job's resulting URI
-def retrieve_transcript(transcirpt_uri):
-    if transcirpt_uri == None:
-        return ''
-    else:
-        response = requests.get(transcirpt_uri).json()
-        transcript = response['results']['transcripts'][0]['transcript']
-        return transcript
+        time.sleep(1)
 
-def run_aws_transcribe(edacc_data):
+
+def _retrieve_transcript(transcript_uri: str | None) -> str:
+    if not transcript_uri:
+        return ""
+    response = requests.get(transcript_uri, timeout=60).json()
+    return response.get("results", {}).get("transcripts", [{}])[0].get("transcript", "")
+
+
+def run_aws_transcribe(edacc_data, results_path: Path | None = None):
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    # Initialize AWS clients to Transcribe
-    transcribe = boto3.client('transcribe',
-                              region_name=os.getenv("AWS_REGION"),
-                              aws_access_key_id=os.getenv("AWS_ACCESS_KEY"),
-                              aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")
-                              )
+    if results_path is None:
+        results_path = _RESULTS_DIR / RESULTS_FILE
 
-    # Data dictionary to hold results
+    transcribe = boto3.client(
+        "transcribe",
+        region_name=os.getenv("AWS_REGION"),
+        aws_access_key_id=os.getenv("AWS_ACCESS_KEY"),
+        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+    )
+
     data = {
         "id": [],
-        "wav_file": [],
         "service_output": [],
         "latency_ms": [],
+        "wav_file": [],
     }
 
     for _, row in edacc_data.iterrows():
-        # Run the service on the selected file
         audio_file = row["audio"]
-        id = row["id"]
+        sample_id = row["id"]
         print(f"AWS Transcribe STT: {audio_file}")
 
-        # Run transcription job and return transcript upon completion
-        start_time = perf_time.perf_counter()
-        job = start_transcription_job(id, transcribe)
-        response_uri = wait_for_job(job, transcribe)
-        transcript = retrieve_transcript(response_uri)
-        latency_ms = (perf_time.perf_counter() - start_time) * 1000.0
+        start_time = time.perf_counter()
+        job_name = _start_transcription_job(sample_id, transcribe)
+        transcript_uri = _wait_for_job(job_name, transcribe)
+        transcript = _retrieve_transcript(transcript_uri)
+        latency_ms = (time.perf_counter() - start_time) * 1000.0
+        print(transcript)
 
-        data["id"].append(f"aws_stt_{id:04d}")
-        data["wav_file"].append(audio_file)
-        data["latency_ms"].append(round(latency_ms, 2))
-        print(transcript, end='\n')
+        data["id"].append(f"aws_stt_{sample_id:04d}")
         data["service_output"].append(transcript)
+        data["latency_ms"].append(round(latency_ms, 2))
+        data["wav_file"].append(audio_file)
 
-    # Add in blank column for LLM judge score
-    data["llm_judge_score"] = [0.0 for r in data["id"]]
+    data["llm_judge_score"] = [0.0 for _ in data["id"]]
 
-    # Convert into DataFrame and save to CSV
-    aws_stt_df = pd.DataFrame(data)
-    aws_stt_df.to_csv(_RESULTS_DIR / RESULTS_FILE, index=False)
-    return aws_stt_df
+    df = pd.DataFrame(data, columns=["id", "service_output", "latency_ms", "llm_judge_score", "wav_file"])
+    df.to_csv(results_path, index=False)
+    return df
 
 
 def run(edacc_data):

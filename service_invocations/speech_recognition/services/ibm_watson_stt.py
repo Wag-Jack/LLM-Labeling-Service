@@ -1,31 +1,29 @@
+import os
+import time
+from pathlib import Path
+
 from dotenv import load_dotenv
 from ibm_cloud_sdk_core.authenticators import IAMAuthenticator
 from ibm_watson import SpeechToTextV1
-import os
 import pandas as pd
-from pathlib import Path
-import time
 
 load_dotenv()
 
-_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition" / "services"  # Task-scoped outputs.
+_RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition" / "services"
 RESULTS_FILE = "ibm_stt.csv"
-# Runs in the main project environment (no provider-specific venv required).
 
 
 def _extract_transcript(result: dict) -> str:
-    # IBM returns a list of results with alternatives; take the top transcript from each.
-    combined = []
+    parts = []
     for item in result.get("results", []):
         alternatives = item.get("alternatives", [])
         if alternatives:
-            combined.append(alternatives[0].get("transcript", ""))
-    return " ".join(part.strip() for part in combined if part).strip()
+            parts.append(alternatives[0].get("transcript", ""))
+    return " ".join(part.strip() for part in parts if part).strip()
 
 
 def run_ibm_watson_stt(edacc_data, results_path: Path | None = None):
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    # Allow an explicit output path for orchestrated runs.
     if results_path is None:
         results_path = _RESULTS_DIR / RESULTS_FILE
 
@@ -37,12 +35,13 @@ def run_ibm_watson_stt(edacc_data, results_path: Path | None = None):
     authenticator = IAMAuthenticator(api_key)
     stt = SpeechToTextV1(authenticator=authenticator)
     stt.set_service_url(service_url)
+    model = os.getenv("IBM_WATSON_MODEL", "en-US_BroadbandModel")
 
     data = {
         "id": [],
-        "wav_file": [],
         "service_output": [],
         "latency_ms": [],
+        "wav_file": [],
     }
 
     for _, row in edacc_data.iterrows():
@@ -57,22 +56,22 @@ def run_ibm_watson_stt(edacc_data, results_path: Path | None = None):
         response = stt.recognize(
             audio=audio_bytes,
             content_type="audio/wav",
-            model="en-US_BroadbandModel",
+            model=model,
         ).get_result()
         latency_ms = (time.perf_counter() - start_time) * 1000.0
-
         transcript = _extract_transcript(response)
+        print(transcript)
+
         data["id"].append(f"ibm_stt_{sample_id:04d}")
-        data["wav_file"].append(audio_file)
         data["service_output"].append(transcript)
         data["latency_ms"].append(round(latency_ms, 2))
-        print(transcript)
+        data["wav_file"].append(audio_file)
 
     data["llm_judge_score"] = [0.0 for _ in data["id"]]
 
-    ibm_df = pd.DataFrame(data)
-    ibm_df.to_csv(results_path, index=False)
-    return ibm_df
+    df = pd.DataFrame(data, columns=["id", "service_output", "latency_ms", "llm_judge_score", "wav_file"])
+    df.to_csv(results_path, index=False)
+    return df
 
 
 def run(edacc_data):

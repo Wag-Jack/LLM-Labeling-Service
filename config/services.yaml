@@ -1,25 +1,27 @@
 speech_recognition:
   google_cloud_stt:
-    enabled: false
+    enabled: true
   assemblyai:
     enabled: false
   aws_transcribe:
-    enabled: false
+    enabled: true
   ibm_watson_stt:
     enabled: true
   speechmatics_stt:
-    enabled: false
+    enabled: true
   deepgram_stt:
-    enabled: false
+    enabled: true
 
 language_translation:
   google_cloud_translation:
-    enabled: false
+    enabled: true
   aws_translate:
-    enabled: false
+    enabled: true
   microsoft_translator:
     enabled: true
   deepl_translation:
+    enabled: true
+  ibm_watson_translator:
     enabled: false
   apptek:
     enabled: false
@@ -33,6 +35,8 @@ emotion_detection:
     enabled: true
   aws_rekognition:
     enabled: true
+  smartclick:
+    enabled: false
   luxand_facesdk:
     enabled: true
   smartclick:
