@@ -1,5 +1,6 @@
 from service_invocations.invoke_speech_recognition import run_speech_recognition
 from service_invocations.invoke_language_translation import run_language_translation
+from service_invocations.invoke_emotion_detection import run_emotion_detection
 from data_management.edacc import load_edacc
 from data_management.en_fr import load_en_fr
 from data_management.vea import load_vea
@@ -25,7 +26,8 @@ def main():
                     edacc_df = load_edacc(NUM_SAMPLES)
                     run_speech_recognition(edacc_df)
                 case 2:
-                    esa_df = load_vea(NUM_SAMPLES)
+                    vea_df = load_vea(NUM_SAMPLES)
+                    run_emotion_detection(vea_df)
                 case 3:
                     print("--- Retrieving EuroParl data pairs ---")
                     europarl_df = load_en_fr(NUM_SAMPLES)

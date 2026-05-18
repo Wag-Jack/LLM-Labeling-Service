@@ -29,3 +29,13 @@ emotion_detection:
     enabled: false
   microsoft_azure_face:
     enabled: false
+  faceplusplus:
+    enabled: true
+  kairos:
+    enabled: true
+  luxand_facesdk:
+    enabled: true
+  sightengine_emotion:
+    enabled: true
+  affectiva:
+    enabled: true

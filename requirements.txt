@@ -12,6 +12,7 @@ ibm-watson
 numpy
 openai
 pandas
+pillow
 PyYAML
 python-dotenv
 speechmatics-batch

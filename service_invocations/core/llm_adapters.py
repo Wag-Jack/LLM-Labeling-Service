@@ -114,15 +114,16 @@ class OpenAIAdapter:
         self._client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
     def generate(self, model: str, prompt: str, inputs: Dict[str, Any],
-                 modalities: List[str]) -> LLMResponse:
+                 modalities: List[str], temperature: float = 0.0) -> LLMResponse:
         if _is_realtime_model(model):
-            return self._generate_realtime(model, prompt, inputs)
+            return self._generate_realtime(model, prompt, inputs, temperature)
         messages = _build_openai_messages(prompt, inputs)
         start_time = time.perf_counter()
         response = self._client.chat.completions.create(
             model=model,
             modalities=modalities,
             messages=messages,
+            temperature=temperature,
         )
         latency_ms = (time.perf_counter() - start_time) * 1000.0
         usage = getattr(response, "usage", None)
@@ -142,7 +143,8 @@ class OpenAIAdapter:
             output_tokens=output_tokens,
         )
 
-    def _generate_realtime(self, model: str, prompt: str, inputs: Dict[str, Any]) -> LLMResponse:
+    def _generate_realtime(self, model: str, prompt: str, inputs: Dict[str, Any],
+                           temperature: float = 0.6) -> LLMResponse:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise UnsupportedProviderError(
@@ -200,6 +202,7 @@ class OpenAIAdapter:
                 "response": {
                     "output_modalities": ["text"],
                     "instructions": prompt,
+                    "temperature": temperature,
                 },
             }))
 
@@ -255,7 +258,7 @@ class GeminiAdapter:
         self._client = genai_legacy
 
     def generate(self, model: str, prompt: str, inputs: Dict[str, Any],
-                 modalities: List[str]) -> LLMResponse:
+                 modalities: List[str], temperature: float = 0.0) -> LLMResponse:
         start_time = time.perf_counter()
         if self._mode == "genai":
             parts = [self._types.Part.from_text(text=prompt)]
@@ -285,6 +288,7 @@ class GeminiAdapter:
             response = self._client.models.generate_content(
                 model=model,
                 contents=contents,
+                config=self._types.GenerateContentConfig(temperature=temperature),
             )
             content = getattr(response, "text", None)
             if content is None and getattr(response, "candidates", None):
@@ -316,7 +320,10 @@ class GeminiAdapter:
                     mime_type=f"image/{image_format}",
                     data=image_bytes,
                 ))
-            response = model_client.generate_content(parts)
+            response = model_client.generate_content(
+                parts,
+                generation_config={"temperature": temperature},
+            )
             content = getattr(response, "text", None) or str(response)
 
         latency_ms = (time.perf_counter() - start_time) * 1000.0
@@ -367,12 +374,13 @@ class MicrosoftPhiAdapter:
         return json.loads(body.decode("utf-8"))
 
     def generate(self, model: str, prompt: str, inputs: Dict[str, Any],
-                 modalities: List[str]) -> LLMResponse:
+                 modalities: List[str], temperature: float = 0.0) -> LLMResponse:
         messages = _build_openai_messages(prompt, inputs)
         start_time = time.perf_counter()
         payload: Dict[str, Any] = {
             "model": model,
             "messages": messages,
+            "temperature": temperature,
         }
         response = self._post_json(payload)
         latency_ms = (time.perf_counter() - start_time) * 1000.0

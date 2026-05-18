@@ -79,6 +79,15 @@ def _resolve_model_id(model_name: str, entry: Dict[str, Any]) -> str:
     return model_id
 
 
+def _resolve_temperature(entry: Dict[str, Any]) -> float:
+    temperature = entry.get("temperature", 0)
+    if temperature is None:
+        return 0.0
+    if not isinstance(temperature, (int, float)):
+        raise ValueError("models.yaml entry temperature must be a number.")
+    return float(temperature)
+
+
 def get_enabled_models(models_path: Path | None = None) -> List[str]:
     if models_path is None:
         models_path = Path.cwd() / "config" / "models.yaml"
@@ -106,6 +115,7 @@ def get_model_generator(
             f"models.yaml entry for '{model_name}' is missing provider."
         )
     model_id = _resolve_model_id(model_name, entry)
+    temperature = _resolve_temperature(entry)
 
     def generate(
         prompt: str,
@@ -115,7 +125,13 @@ def get_model_generator(
         payload_inputs = inputs or {}
         requested_modalities = modalities or infer_modalities(payload_inputs)
         adapter = get_llm_adapter(provider)
-        return adapter.generate(model_id, prompt, payload_inputs, requested_modalities)
+        return adapter.generate(
+            model_id,
+            prompt,
+            payload_inputs,
+            requested_modalities,
+            temperature=temperature,
+        )
 
     return generate
 
