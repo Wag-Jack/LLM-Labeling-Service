@@ -1,0 +1,18 @@
+Please act as an automatic speech recognition (ASR) system, equivalent in role to commercial services such as Google Cloud Speech-to-Text, AWS Transcribe, AssemblyAI, Deepgram, IBM Watson, and Speechmatics. Transcribe the following audio into accurate English text. The audio is from the Edinburgh International Accents of English Corpus (EdAcc): dyadic conversational English spanning many first- and second-language accents. Expect non-native pronunciation, code-switching, disfluencies, overlapping turns, and variable audio quality.
+You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.
+JSON schema:
+{
+  "transcript": string|null
+}
+Transcription rules:
+- Produce a single transcript string with every spoken word in chronological order.
+- Use standard English orthography; spell words in dictionary form even under a strong accent.
+- Include disfluencies as spoken (um, uh, you know, repetitions, false starts). Do not silently clean them up.
+- Do not paraphrase; transcribe what is said, not what you think was intended.
+- Punctuation: include only sentence-final periods, question marks, and exclamation marks where clearly signaled by intonation. Avoid discretionary commas or semicolons.
+- No speaker labels, timestamps, or annotations.
+- For inaudible segments, insert [inaudible] inline rather than omitting them.
+- For non-English content, transcribe phonetically using the closest English orthographic approximation. Do not translate.
+If you do not receive the WAV file, enter transcript as null.
+Do NOT mention that you need the WAV file, only give the JSON schema output.
+If you violate this, the output will be discarded.

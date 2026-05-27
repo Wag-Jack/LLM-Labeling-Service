@@ -1,4 +1,5 @@
 import re
+
 import pandas as pd
 
 from service_invocations.core.oracle_utils import normalize_id as _normalize_id
@@ -20,9 +21,6 @@ def _normalize_text(text):
 
 
 def word_error_counts(reference, hypothesis):
-    """
-    Return (error_count, reference_word_count) for WER calculation.
-    """
     ref_words = _normalize_text(reference)
     hyp_words = _normalize_text(hypothesis)
 
@@ -48,24 +46,12 @@ def word_error_counts(reference, hypothesis):
                 dp[i][j] = dp[i - 1][j - 1]
             else:
                 dp[i][j] = 1 + min(
-                    dp[i - 1][j],     # deletion
-                    dp[i][j - 1],     # insertion
-                    dp[i - 1][j - 1]  # substitution
+                    dp[i - 1][j],
+                    dp[i][j - 1],
+                    dp[i - 1][j - 1]
                 )
 
     return dp[n][m], n
-
-
-def _init_data(service_names):
-    data = {"id": []}
-    for name in service_names:
-        data[f"{name}_oracle_errors"] = []
-        data[f"{name}_oracle_ref_words"] = []
-        data[f"{name}_oracle_wer"] = []
-        data[f"{name}_human_errors"] = []
-        data[f"{name}_human_ref_words"] = []
-        data[f"{name}_human_wer"] = []
-    return data
 
 
 def _build_transcripts_by_service(results_by_service):
@@ -78,64 +64,56 @@ def _build_transcripts_by_service(results_by_service):
     return transcripts_by_service
 
 
-def compute_wer_counts(results_by_service, oracle_results, edacc_data):
-    """
-    Compute WER numerator/denominator counts for each service against:
-    - LLM oracle transcripts
-    - Human ground truth (edacc_data['text'])
-
-    Returns a DataFrame with per-sample error counts and reference word counts.
-    """
+def compute_wer_rows(results_by_service, oracle_results, edacc_data):
+    """Long-format per-sample WER rows for write_accuracy(...)."""
     if not results_by_service:
         raise ValueError("No speech results provided for WER calculation.")
 
     transcripts_by_service = _build_transcripts_by_service(results_by_service)
-    oracle_transcripts = dict(zip(oracle_results['id'].map(_normalize_id),
-                                  oracle_results['llm_oracle']))
+    oracle_transcripts = dict(zip(
+        oracle_results["id"].map(_normalize_id),
+        oracle_results["llm_oracle"],
+    ))
 
-    service_names = list(transcripts_by_service.keys())
-    data = _init_data(service_names)
-
+    rows = []
     for _, row in edacc_data.iterrows():
-        sample_id = row["id"]
-        sample_id_key = _normalize_id(sample_id)
+        sample_id_key = _normalize_id(row["id"])
         human_ref = row["text"]
         oracle_ref = oracle_transcripts.get(sample_id_key)
 
-        data["id"].append(sample_id_key)
         for name, transcripts in transcripts_by_service.items():
             hyp = transcripts.get(sample_id_key, "")
             oracle_err, oracle_ref_words = word_error_counts(oracle_ref, hyp)
             human_err, human_ref_words = word_error_counts(human_ref, hyp)
             oracle_wer = (oracle_err / oracle_ref_words) if oracle_ref_words > 0 else None
             human_wer = (human_err / human_ref_words) if human_ref_words > 0 else None
-            data[f"{name}_oracle_errors"].append(oracle_err)
-            data[f"{name}_oracle_ref_words"].append(oracle_ref_words)
-            data[f"{name}_oracle_wer"].append(oracle_wer)
-            data[f"{name}_human_errors"].append(human_err)
-            data[f"{name}_human_ref_words"].append(human_ref_words)
-            data[f"{name}_human_wer"].append(human_wer)
+            rows.append({
+                "id": sample_id_key,
+                "service": name,
+                "oracle_errors": oracle_err,
+                "oracle_ref_words": oracle_ref_words,
+                "oracle_wer": oracle_wer,
+                "human_errors": human_err,
+                "human_ref_words": human_ref_words,
+                "human_wer": human_wer,
+            })
+    return rows
 
-    return pd.DataFrame(data)
 
-
-def compute_wer_summary(wer_counts_df, service_names):
-    """
-    Compute corpus-level WERs (sum of errors / sum of reference words) per service.
-    """
-    summary = {"service": [], "oracle_wer": [], "human_wer": []}
+def compute_wer_summary_rows(per_sample_rows, service_names):
+    """Corpus-level WER per service (sum-errors / sum-ref-words)."""
+    df = pd.DataFrame(per_sample_rows)
+    out = []
     for name in service_names:
-        oracle_errors = wer_counts_df[f"{name}_oracle_errors"].sum()
-        oracle_ref_words = wer_counts_df[f"{name}_oracle_ref_words"].sum()
-        human_errors = wer_counts_df[f"{name}_human_errors"].sum()
-        human_ref_words = wer_counts_df[f"{name}_human_ref_words"].sum()
-
-        summary["service"].append(name)
-        summary["oracle_wer"].append(
-            (oracle_errors / oracle_ref_words) if oracle_ref_words > 0 else None
-        )
-        summary["human_wer"].append(
-            (human_errors / human_ref_words) if human_ref_words > 0 else None
-        )
-
-    return pd.DataFrame(summary)
+        slice_df = df[df["service"] == name]
+        oracle_errors = slice_df["oracle_errors"].sum()
+        oracle_ref_words = slice_df["oracle_ref_words"].sum()
+        human_errors = slice_df["human_errors"].sum()
+        human_ref_words = slice_df["human_ref_words"].sum()
+        out.append({
+            "service": name,
+            "oracle_wer": (oracle_errors / oracle_ref_words) if oracle_ref_words > 0 else None,
+            "human_wer": (human_errors / human_ref_words) if human_ref_words > 0 else None,
+            "n_samples": int(len(slice_df)),
+        })
+    return out

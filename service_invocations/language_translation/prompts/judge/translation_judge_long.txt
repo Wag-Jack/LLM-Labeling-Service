@@ -1,0 +1,28 @@
+Please act as an evaluator comparing N independent machine translation outputs. All systems translate the same English source from the EuroParl parliamentary corpus into French. You do NOT have access to a reference translation; judge on the source and the linguistic quality of each candidate.
+You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.
+JSON schema:
+{
+  "llm_translation": string (your best French translation of the source),
+  "winner": string (name of the system whose translation is most accurate; must match a name below),
+  "scores": {
+    "<service_name>": float in 0.0-1.0 (per-service translation quality, higher is better),
+    ...one entry per system listed below...
+  }
+}
+"winner" MUST be one of the system names below verbatim, and should correspond to the system with the highest score in "scores". If two systems tie on quality, pick either.
+The "scores" object MUST contain exactly one float entry per system name shown below (use the names verbatim as keys). Do not invent extra keys, do not omit any system, and do not collapse them into letters.
+English source: {source_text}
+Systems (name: translation):
+{service_blocks}
+Evaluation criteria:
+- Adequacy: does the translation preserve the full propositional content? Check for omissions and unsupported additions.
+- Fluency: does it read as natural, idiomatic French at a formal parliamentary register?
+- Named entities: are persons, institutions, and member states rendered with established French equivalents? Errors here are weighted heavily.
+- Terminology: is legislative/procedural vocabulary accurate (e.g., "Member State" -> "Etat membre," "rapporteur" -> "rapporteur")?
+- Register: formal vous, appropriate nominalizations, parliamentary syntactic conventions.
+- Grammar: agreement, tense, mood, idiom selection.
+- Do not favor concision by default; adequacy outweighs brevity.
+- If two or more translations are roughly equivalent in adequacy, give them similar scores, favoring stronger fluency and terminological accuracy.
+If you do not receive the text, set "llm_translation" to null, "winner" to null, and every score in "scores" to null.
+Do NOT mention that you need the text, only give the JSON schema output.
+If you violate this, the output will be discarded.

@@ -17,12 +17,12 @@ from service_invocations.core.results_io import write_judge
 from service_invocations.models import get_enabled_models, get_model_generator
 
 _PARADIGM_NAME = "judge"
-_TASK_NAME = "speech_recognition"
+_TASK_NAME = "emotion_detection"
 _PROMPTS_ROOT = Path(__file__).parent / "prompts"
 _PARADIGM = "judge"
 
 _DEFAULT_TASK_DIR = (
-    Path.cwd() / "service_invocations" / "results" / "speech_recognition"
+    Path.cwd() / "service_invocations" / "results" / "emotion_detection"
 )
 
 
@@ -45,9 +45,26 @@ def _load_enabled_entries(config_path: Path, task_name: str) -> list[str]:
     return enabled
 
 
-def judge_transcripts(
+def _extract_top_emotion(service_output: str | None) -> str:
+    if service_output is None:
+        return ""
+    try:
+        payload = json.loads(service_output)
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    top = payload.get("top_emotion")
+    if isinstance(top, dict):
+        name = top.get("name")
+        if name:
+            return str(name).strip().lower()
+    return ""
+
+
+def judge_emotions(
     results_by_service: dict[str, pd.DataFrame],
-    edacc_data: pd.DataFrame,
+    vea_data: pd.DataFrame,
     prompt_name: str,
     results_dir: Path | None = None,
     services_path: Path | None = None,
@@ -77,20 +94,20 @@ def judge_transcripts(
         print("--- Skipping LLM Judging (no enabled service results) ---")
         return None
 
-    transcripts_by_service = {}
+    predictions_by_service: dict[str, dict[str, str]] = {}
     for name, df in services.items():
         if "id" not in df.columns or "service_output" not in df.columns:
             raise ValueError(f"Missing required columns for {name}.")
-        transcripts_by_service[name] = dict(
-            zip(df["id"].map(_normalize_id), df["service_output"])
+        predictions_by_service[name] = dict(
+            zip(df["id"].map(_normalize_id), df["service_output"].map(_extract_top_emotion))
         )
 
-    wav_files = edacc_data["audio"].tolist()
-    ids = edacc_data["id"].tolist()
+    image_files = vea_data["image"].tolist()
+    ids = vea_data["id"].tolist()
 
     samples = [
-        {"id": sample_id, "audio": wav}
-        for sample_id, wav in zip(ids, wav_files)
+        {"id": sample_id, "image": image_file}
+        for sample_id, image_file in zip(ids, image_files)
     ]
 
     def make_processor(model_name: str):
@@ -99,17 +116,17 @@ def judge_transcripts(
 
         def process(sample: dict) -> dict:
             sample_id = sample["id"]
-            wav = sample["audio"]
+            image_file = sample["image"]
             id_key = _normalize_id(sample_id)
-            print(f"LLM Judging ({model_name}): {wav}")
+            print(f"LLM Judging ({model_name}): {image_file}")
 
             service_blocks = "\n".join(
-                f"{name}: {transcripts_by_service[name].get(id_key, '')}"
+                f"{name}: {predictions_by_service[name].get(id_key, '')}"
                 for name in services.keys()
             )
             prompt = _load_prompt(prompt_path, service_blocks=service_blocks)
 
-            response = generator(prompt, inputs={"audio": wav})
+            response = generator(prompt, inputs={"image": image_file})
             content = response.content
             print(content)
             cost = compute_cost(
@@ -133,7 +150,7 @@ def judge_transcripts(
                 else:
                     scores = {}
             except json.JSONDecodeError:
-                llm_output = {"llm_transcript": "n/a"}
+                llm_output = {"llm_emotion": "n/a"}
                 scores = {}
 
             if not isinstance(scores, dict):
@@ -145,7 +162,7 @@ def judge_transcripts(
                 winner = None
             return {
                 "id": id_key,
-                "llm_label": llm_output.get("llm_transcript", "n/a"),
+                "llm_label": llm_output.get("llm_emotion", "n/a"),
                 "winner": winner,
                 "scores": merged_scores,
                 "latency_ms": response.latency_ms,

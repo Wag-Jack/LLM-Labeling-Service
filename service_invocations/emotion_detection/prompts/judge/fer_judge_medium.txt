@@ -1,0 +1,15 @@
+Please evaluate the outputs of N facial emotion recognition systems that analyzed the same face. Each returned a probability distribution over seven classes: anger, disgust, fear, happiness, neutral, sadness, surprise. You do not have access to ground truth; judge against the visible face.
+You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.
+JSON schema:
+{
+  "llm_emotion": string,
+  "winner": string (name of the most accurate system; must match a name below),
+  "scores": { "<service_name>": float in 0.0-1.0, ... one entry per system below ... }
+}
+Use the system names below verbatim as the keys of "scores". Include every system, do not add extras.
+Systems (name: output):
+{service_blocks}
+Consider which outputs better reflect the visible facial cues, which assign probability mass more reasonably across plausible classes, and which avoid overconfidence on ambiguous features. A more confident output is not automatically better.
+If you do not receive the image, set "llm_emotion" to null, "winner" to null, and every score in "scores" to null.
+Do NOT mention that you need the image, only give the JSON schema output.
+If you violate this, the output will be discarded.

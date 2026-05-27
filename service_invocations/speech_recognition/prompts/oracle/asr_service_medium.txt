@@ -1,0 +1,15 @@
+Please act as an automatic speech recognition system and transcribe the following audio verbatim into English text.
+You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.
+JSON schema:
+{
+  "transcript": string|null
+}
+Rules:
+- Capture every spoken word in order using standard English orthography.
+- Include sentence-final punctuation only where clearly indicated by intonation.
+- Do not add timestamps, speaker labels, or annotations.
+- Do not paraphrase, correct grammar, or omit disfluencies (um, uh, repetitions) - transcribe what is actually spoken.
+- For accented speech, transcribe the intended English word in dictionary form rather than guessing intent.
+If you do not receive the WAV file, enter transcript as null.
+Do NOT mention that you need the WAV file, only give the JSON schema output.
+If you violate this, the output will be discarded.

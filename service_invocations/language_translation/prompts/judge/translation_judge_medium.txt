@@ -1,0 +1,16 @@
+Please evaluate N French translations of the same English source, produced by different MT systems. You do not have access to a reference translation; judge against the source.
+You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.
+JSON schema:
+{
+  "llm_translation": string,
+  "winner": string (name of the most accurate system; must match a name below),
+  "scores": { "<service_name>": float in 0.0-1.0, ... one entry per system below ... }
+}
+Use the system names below verbatim as keys of "scores"; include every system.
+English source: {source_text}
+Systems (name: translation):
+{service_blocks}
+Consider which translations preserve the source meaning more faithfully, use more idiomatic French, handle named entities correctly, match the source register, and avoid omissions or additions. A polished translation that drops information is weaker than a less polished one that preserves everything.
+If you do not receive the text, set "llm_translation" to null, "winner" to null, and every score in "scores" to null.
+Do NOT mention that you need the text, only give the JSON schema output.
+If you violate this, the output will be discarded.

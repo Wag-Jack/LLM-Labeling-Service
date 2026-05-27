@@ -1,0 +1,9 @@
+Please give me a verbatim transcript for the following audio file.
+You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.
+JSON schema:
+{
+  "transcript": string|null
+}
+If you do not receive the WAV file, enter transcript as null.
+Do NOT mention that you need the WAV file, only give the JSON schema output.
+If you violate this, the output will be discarded.

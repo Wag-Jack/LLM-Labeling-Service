@@ -1,0 +1,17 @@
+Please act as a neural machine translation system and translate the following English text into fluent, accurate French.
+You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.
+JSON schema:
+{
+  "translation": string|null
+}
+English source: {source_text}
+Rules:
+- Preserve the original meaning, register, and tone.
+- Use standard metropolitan French unless the source clearly calls for a regional variant.
+- Maintain sentence structure where natural; restructure only when required for French fluency.
+- Preserve proper nouns and named entities with no established French equivalent.
+- Match formality: use vous unless the source clearly indicates an informal register.
+- Do not add explanatory notes, footnotes, or commentary.
+If you do not receive the text, enter translation as null.
+Do NOT mention that you need the text, only give the JSON schema output.
+If you violate this, the output will be discarded.

@@ -1,6 +1,7 @@
 import boto3
 from datasets import ClassLabel, Image, load_dataset
 import os
+import random
 import pandas as pd
 from pathlib import Path
 
@@ -16,17 +17,25 @@ Labels:
 7 = surprise
 """
 
-def load_vea(amount=50, aws=True):
+def load_vea(amount=50, aws=True, randomize=True, seed=None):
     # Ensure output directory exists
     output_dir = Path.cwd() / "Data" / "VEA"
     images_dir = output_dir / "images"
     os.makedirs(images_dir, exist_ok=True)
 
-    # Load the image dataset
+    # Load the full train split so randomization draws uniformly across all emotions
+    # rather than over-sampling whichever class happens to lead the split.
+    split = "train" if randomize else f"train[:{amount}]"
     dataset = load_dataset(
         "FastJobs/Visual_Emotional_Analysis",
-        split=f"train[:{amount}]"
+        split=split,
     ).cast_column("image", Image())
+
+    indices = list(range(len(dataset)))
+    if randomize:
+        rng = random.Random(seed)
+        rng.shuffle(indices)
+    indices = indices[:amount]
 
     # Data dictionary to help with DataFrame creation for comprehensive metadata
     data = {
@@ -35,22 +44,21 @@ def load_vea(amount=50, aws=True):
         "label": [],
     }
 
-    i = 1
-    for row in dataset:
+    for new_id, dataset_idx in enumerate(indices, start=1):
+        row = dataset[dataset_idx]
         # Copy everything except image path to data dictionary
-        data["id"].append(i)
+        data["id"].append(new_id)
         data["label"].append(row["label"])
 
         # Create local png file for each entry in dataset
         image = row["image"]
-        image_path = images_dir / f"{i:04d}.png"
+        image_path = images_dir / f"{new_id:04d}.png"
         data["image"].append(str(image_path))
 
-        # Save image file locsally if it does not exist
-        if not image_path.exists():
+        # Save image file locally if it does not exist (overwrite when randomized to
+        # avoid carrying stale pixels from a previous, differently-seeded sample).
+        if randomize or not image_path.exists():
             image.save(image_path)
-
-        i += 1
 
     vea_df = pd.DataFrame(data)
     vea_df.to_csv(output_dir / "vea_metadata.csv", index=False)

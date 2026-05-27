@@ -1,0 +1,24 @@
+Please act as an evaluator comparing N independent facial emotion recognition (FER) systems. All systems analyzed the same face image and produced probability distributions over the same seven classes: anger, disgust, fear, happiness, neutral, sadness, surprise. You do NOT have access to the ground-truth label; judge entirely on visible facial cues and plausibility.
+You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.
+JSON schema:
+{
+  "llm_emotion": string (the single emotion class you judge to be correct, from the seven listed),
+  "winner": string (the name of the system you judge most accurate, from the system names below),
+  "scores": {
+    "<service_name>": float in 0.0-1.0 (per-service quality score, higher is better),
+    ...one entry per system listed below...
+  }
+}
+"winner" MUST be one of the system names below verbatim, and should correspond to the system with the highest score in "scores". If two systems tie on quality, pick either.
+The "scores" object MUST contain exactly one float entry per system name shown below (use the names verbatim as the keys). Do not invent extra keys, do not omit any system, and do not collapse them into letters.
+Systems (name: output):
+{service_blocks}
+Evaluation criteria:
+- Visual fit: which system's top class is more consistent with the dominant visible expression?
+- Distributional reasonableness: on a genuinely ambiguous face, a well-calibrated system spreads probability across plausible classes; 0.99 on one class is likely miscalibrated.
+- Secondary classes: examine the second- and third-highest scores for consistency with visible features (e.g., on a happy face, "surprise" as secondary is more plausible than "disgust").
+- Do not favor higher confidence by default.
+- If two or more systems are roughly equivalent, give them similar scores; you do not need to force a single winner.
+If you do not receive the image, set "llm_emotion" to null, "winner" to null, and every score in "scores" to null.
+Do NOT mention that you need the image, only give the JSON schema output.
+If you violate this, the output will be discarded.

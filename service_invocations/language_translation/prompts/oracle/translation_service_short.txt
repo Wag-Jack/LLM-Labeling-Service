@@ -1,0 +1,10 @@
+Please translate the following text from English to French.
+You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.
+JSON schema:
+{
+  "translation": string|null
+}
+English: {source_text}
+If you do not receive the text, enter translation as null.
+Do NOT mention that you need the text, only give the JSON schema output.
+If you violate this, the output will be discarded.

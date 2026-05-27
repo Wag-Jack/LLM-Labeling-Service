@@ -1,0 +1,13 @@
+Please classify the facial emotion in the following image.
+You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.
+JSON schema:
+{
+  "scores": {
+    "anger": float, "disgust": float, "fear": float, "happiness": float,
+    "neutral": float, "sadness": float, "surprise": float
+  }
+}
+Scores must be floats in 0.0-1.0 and sum to 1.0.
+If you do not receive the image, set every score to null.
+Do NOT mention that you need the image, only give the JSON schema output.
+If you violate this, the output will be discarded.

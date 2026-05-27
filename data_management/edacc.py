@@ -1,21 +1,31 @@
 import boto3
 from datasets import Audio, load_dataset
 import os
+import random
 import pandas as pd
 from pathlib import Path
 import soundfile as sf
 
-def load_edacc(amount=50, min_duration=2.0, max_duration=10.0, aws=True):
+def load_edacc(amount=50, min_duration=2.0, max_duration=10.0, aws=True,
+               randomize=True, seed=None, pool_multiplier=10):
     # Ensure output directory exists
     output_dir = Path.cwd() / "Data" / "EdAcc"
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(output_dir / "wav", exist_ok=True)
-    
-    # Load the audio files from the dataset and get the audio path to put into transcription request
+
+    # Pull a generous superset so duration filtering still has enough rows after shuffling.
+    pool_size = max(amount * pool_multiplier, amount)
     edacc = load_dataset(
         "edinburghcstr/edacc",
-        split=f"test[:{amount*10}]"
+        split=f"test[:{pool_size}]"
     ).cast_column("audio", Audio())
+
+    # Iteration order across the pool. When randomize=True the first N rows that pass
+    # the duration filter are an unbiased sample of the pool, not just its prefix.
+    indices = list(range(len(edacc)))
+    if randomize:
+        rng = random.Random(seed)
+        rng.shuffle(indices)
 
     # Data dictionary to help with DataFrame creation for comprehensive metadata of EdAcc
     data = {
@@ -31,10 +41,10 @@ def load_edacc(amount=50, min_duration=2.0, max_duration=10.0, aws=True):
     }
 
     # Since there's issues with sending small audio to each transcription service, we'll have to choose data with appropriate length
-    curr_amnt, i = 0, 0
-    while curr_amnt < amount:        
+    curr_amnt, cursor = 0, 0
+    while curr_amnt < amount and cursor < len(indices):
         # Check if the audio sample reaches a certain duration of time
-        row = edacc[i]
+        row = edacc[indices[cursor]]
         audio = row["audio"]
         duration = len(audio["array"]) / audio["sampling_rate"]
 
@@ -60,7 +70,14 @@ def load_edacc(amount=50, min_duration=2.0, max_duration=10.0, aws=True):
 
             curr_amnt += 1
 
-        i += 1
+        cursor += 1
+
+    if curr_amnt < amount:
+        print(
+            f"Warning: only {curr_amnt}/{amount} EdAcc samples matched the duration "
+            f"window ({min_duration}-{max_duration}s) within the pool of {pool_size}. "
+            "Increase pool_multiplier to draw from a larger candidate set."
+        )
 
     edacc_df = pd.DataFrame(data)
     edacc_df.to_csv(Path.cwd() / "Data" / "EdAcc" / "edacc_metadata.csv", index=False)

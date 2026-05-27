@@ -1,0 +1,14 @@
+N FER systems classified the same face. Please score each one. You do not have the ground truth.
+You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.
+JSON schema:
+{
+  "llm_emotion": string,
+  "winner": string (name of most accurate system; must match a name below),
+  "scores": { "<service_name>": float in 0.0-1.0, ... one entry per system below ... }
+}
+Use the system names below verbatim as keys; include every system.
+Systems (name: output):
+{service_blocks}
+If you do not receive the image, set "llm_emotion" to null, "winner" to null, and every score in "scores" to null.
+Do NOT mention that you need the image, only give the JSON schema output.
+If you violate this, the output will be discarded.

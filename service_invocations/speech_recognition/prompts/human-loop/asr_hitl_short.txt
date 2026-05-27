@@ -1,0 +1,15 @@
+N ASR systems transcribed the same audio. Please score each one and produce your own best transcript, or defer to a human if uncertain. You do not have the ground truth.
+You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.
+JSON schema:
+{
+  "llm_transcript": string,
+  "scores": { "<service_name>": float in 0.0-1.0, ... one entry per system below ... },
+  "confidence": float in 0.0-1.0,
+  "defer_to_human": bool
+}
+Set defer_to_human to true if confidence < 0.6. Use the system names below verbatim as keys; include every system.
+Systems (name: transcript):
+{service_blocks}
+If you do not receive the WAV file, set "llm_transcript" to null, every score in "scores" to null, and defer_to_human to true.
+Do NOT mention that you need the WAV file, only give the JSON schema output.
+If you violate this, the output will be discarded.

@@ -1,0 +1,15 @@
+N MT systems translated the same English text into French. Please score each translation and produce your own best translation. You do not have a reference.
+You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.
+JSON schema:
+{
+  "llm_translation": string,
+  "winner": string (name of most accurate system; must match a name below),
+  "scores": { "<service_name>": float in 0.0-1.0, ... one entry per system below ... }
+}
+Use the system names below verbatim as keys; include every system.
+English source: {source_text}
+Systems (name: translation):
+{service_blocks}
+If you do not receive the text, set "llm_translation" to null, "winner" to null, and every score in "scores" to null.
+Do NOT mention that you need the text, only give the JSON schema output.
+If you violate this, the output will be discarded.

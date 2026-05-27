@@ -13,16 +13,18 @@ from service_invocations.core.oracle_utils import (
     normalize_id as _normalize_id,
     resolve_prompt_path as _resolve_prompt_path,
 )
-from service_invocations.core.results_io import write_judge
+from service_invocations.core.results_io import write_human_loop
 from service_invocations.models import get_enabled_models, get_model_generator
 
-_PARADIGM_NAME = "judge"
-_TASK_NAME = "speech_recognition"
+_PARADIGM_NAME = "human_loop"
+_TASK_NAME = "language_translation"
 _PROMPTS_ROOT = Path(__file__).parent / "prompts"
-_PARADIGM = "judge"
+_PARADIGM = "human-loop"
+_CONFIDENCE_THRESHOLD = 0.7
+_GROUND_TRUTH_COLUMN = "french"
 
 _DEFAULT_TASK_DIR = (
-    Path.cwd() / "service_invocations" / "results" / "speech_recognition"
+    Path.cwd() / "service_invocations" / "results" / "language_translation"
 )
 
 
@@ -45,10 +47,11 @@ def _load_enabled_entries(config_path: Path, task_name: str) -> list[str]:
     return enabled
 
 
-def judge_transcripts(
+def human_loop_translations(
     results_by_service: dict[str, pd.DataFrame],
-    edacc_data: pd.DataFrame,
+    europarl_data: pd.DataFrame,
     prompt_name: str,
+    confidence_threshold: float = _CONFIDENCE_THRESHOLD,
     results_dir: Path | None = None,
     services_path: Path | None = None,
     models_path: Path | None = None,
@@ -67,30 +70,33 @@ def judge_transcripts(
     enabled_models = get_enabled_models(models_path)
 
     if not enabled_models:
-        print("--- Skipping LLM Judging (no enabled models) ---")
+        print("--- Skipping LLM Human-Loop (no enabled models) ---")
         return None
 
     services = {
         name: df for name, df in results_by_service.items() if name in enabled_services
     }
     if not services:
-        print("--- Skipping LLM Judging (no enabled service results) ---")
+        print("--- Skipping LLM Human-Loop (no enabled service results) ---")
         return None
 
-    transcripts_by_service = {}
+    translations_by_service = {}
     for name, df in services.items():
         if "id" not in df.columns or "service_output" not in df.columns:
             raise ValueError(f"Missing required columns for {name}.")
-        transcripts_by_service[name] = dict(
+        translations_by_service[name] = dict(
             zip(df["id"].map(_normalize_id), df["service_output"])
         )
 
-    wav_files = edacc_data["audio"].tolist()
-    ids = edacc_data["id"].tolist()
+    ground_truth = dict(
+        zip(europarl_data["id"].map(_normalize_id), europarl_data[_GROUND_TRUTH_COLUMN])
+    )
+    english_input = europarl_data["english"].tolist()
+    ids = europarl_data["id"].tolist()
 
     samples = [
-        {"id": sample_id, "audio": wav}
-        for sample_id, wav in zip(ids, wav_files)
+        {"id": sample_id, "english": english}
+        for sample_id, english in zip(ids, english_input)
     ]
 
     def make_processor(model_name: str):
@@ -99,17 +105,21 @@ def judge_transcripts(
 
         def process(sample: dict) -> dict:
             sample_id = sample["id"]
-            wav = sample["audio"]
+            english = sample["english"]
             id_key = _normalize_id(sample_id)
-            print(f"LLM Judging ({model_name}): {wav}")
+            print(f"LLM Human-Loop ({model_name}): {english}")
 
             service_blocks = "\n".join(
-                f"{name}: {transcripts_by_service[name].get(id_key, '')}"
+                f"{name}: {translations_by_service[name].get(id_key, '')}"
                 for name in services.keys()
             )
-            prompt = _load_prompt(prompt_path, service_blocks=service_blocks)
+            prompt = _load_prompt(
+                prompt_path,
+                source_text=english,
+                service_blocks=service_blocks,
+            )
 
-            response = generator(prompt, inputs={"audio": wav})
+            response = generator(prompt, inputs={"text": english})
             content = response.content
             print(content)
             cost = compute_cost(
@@ -128,26 +138,41 @@ def judge_transcripts(
             default_scores = {name: -1 for name in services.keys()}
             try:
                 llm_output = json.loads(content)
-                if isinstance(llm_output, dict):
-                    scores = llm_output.get("scores", {})
-                else:
-                    scores = {}
+                if not isinstance(llm_output, dict):
+                    llm_output = {}
             except json.JSONDecodeError:
-                llm_output = {"llm_transcript": "n/a"}
-                scores = {}
+                llm_output = {}
 
+            scores = llm_output.get("scores", {})
             if not isinstance(scores, dict):
                 scores = {}
-
             merged_scores = {**default_scores, **scores}
+
+            confidence = llm_output.get("confidence")
+            try:
+                confidence_value = float(confidence)
+            except (TypeError, ValueError):
+                confidence_value = 0.0
+
+            llm_translation = llm_output.get("llm_translation", "n/a")
+            fallback_used = confidence_value < confidence_threshold
+            human_label_used = ""
+            if fallback_used:
+                human_label_used = ground_truth.get(id_key, "") or ""
+                llm_translation = human_label_used or llm_translation
+
             winner = llm_output.get("winner") if isinstance(llm_output, dict) else None
             if winner is not None and winner not in services:
                 winner = None
+
             return {
                 "id": id_key,
-                "llm_label": llm_output.get("llm_transcript", "n/a"),
+                "llm_label": llm_translation,
                 "winner": winner,
                 "scores": merged_scores,
+                "confidence": confidence_value,
+                "fallback_used": fallback_used,
+                "human_label_used": human_label_used,
                 "latency_ms": response.latency_ms,
                 "input_tokens": response.input_tokens,
                 "output_tokens": response.output_tokens,
@@ -169,12 +194,15 @@ def judge_transcripts(
                     "is_winner": winner == service_name if winner is not None else False,
                     "llm_label": r.get("llm_label", "n/a"),
                     "winner": winner,
+                    "confidence": r.get("confidence", 0.0),
+                    "fallback_used": r.get("fallback_used", False),
+                    "human_label_used": r.get("human_label_used", ""),
                     "latency_ms": r.get("latency_ms"),
                     "input_tokens": r.get("input_tokens"),
                     "output_tokens": r.get("output_tokens"),
                     "cost_usd": r.get("cost_usd"),
                 })
-        write_judge(task_dir, task_name, prompt_name, model_name, long_rows)
+        write_human_loop(task_dir, task_name, prompt_name, model_name, long_rows)
 
     run_with_failover(
         models=enabled_models,

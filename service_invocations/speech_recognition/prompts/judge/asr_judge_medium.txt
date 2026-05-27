@@ -1,0 +1,15 @@
+Please evaluate N transcripts produced by different ASR systems for the same audio file. You do not have access to ground truth; judge against the audio.
+You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.
+JSON schema:
+{
+  "llm_transcript": string,
+  "winner": string (name of the most accurate system; must match a name below),
+  "scores": { "<service_name>": float in 0.0-1.0, ... one entry per system below ... }
+}
+Use the system names below verbatim as keys of "scores"; include every system.
+Systems (name: transcript):
+{service_blocks}
+Consider which transcripts more faithfully capture the spoken words, handle accented speech accurately, preserve disfluencies as spoken, and avoid hallucinated content. A shorter or more polished transcript is not automatically better - fidelity to what was actually spoken is what matters.
+If you do not receive the WAV file, set "llm_transcript" to null, "winner" to null, and every score in "scores" to null.
+Do NOT mention that you need the WAV file, only give the JSON schema output.
+If you violate this, the output will be discarded.

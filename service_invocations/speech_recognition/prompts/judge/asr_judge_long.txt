@@ -1,0 +1,26 @@
+Please act as an evaluator comparing N independent ASR outputs for the same audio file from the EdAcc accented English speech dataset. Each output is a transcript string. You do NOT have access to the ground-truth transcript; judge on your own perception of the audio and the linguistic plausibility of each transcript.
+You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.
+JSON schema:
+{
+  "llm_transcript": string (your best transcript of what was actually spoken),
+  "winner": string (name of the system whose transcript is most accurate; must match a name below),
+  "scores": {
+    "<service_name>": float in 0.0-1.0 (per-service transcript quality, higher is better),
+    ...one entry per system listed below...
+  }
+}
+"winner" MUST be one of the system names below verbatim, and should correspond to the system with the highest score in "scores". If two systems tie on quality, pick either.
+The "scores" object MUST contain exactly one float entry per system name shown below (use the names verbatim as keys). Do not invent extra keys, do not omit any system, and do not collapse them into letters.
+Systems (name: transcript):
+{service_blocks}
+Evaluation criteria:
+- Word-level fidelity: which transcripts better capture the actual words spoken, including under accented pronunciation? Similar-sounding substitutions count against a transcript.
+- Insertions and deletions: identify words present in one transcript but absent in others, and judge whether the audio supports them or they appear hallucinated.
+- Disfluencies: EdAcc audio contains um, uh, repetitions, and false starts; a transcript that silently cleans these up loses fidelity even if it looks more polished.
+- Accent robustness: non-native pronunciations should map to standard English orthography of the intended word, not phonetic guesses or invented words.
+- Code-switching: translation is incorrect; phonetic approximation or [inaudible] is acceptable.
+- Do not favor fluency by default.
+- If two or more transcripts are roughly equivalent, give them similar scores.
+If you do not receive the WAV file, set "llm_transcript" to null, "winner" to null, and every score in "scores" to null.
+Do NOT mention that you need the WAV file, only give the JSON schema output.
+If you violate this, the output will be discarded.

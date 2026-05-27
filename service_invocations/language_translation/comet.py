@@ -4,6 +4,7 @@ from comet import download_model, load_from_checkpoint
 
 from service_invocations.core.oracle_utils import normalize_id as _normalize_id
 
+
 def _build_outputs_by_service(results_by_service):
     outputs_by_service = {}
     for name, df in results_by_service.items():
@@ -22,13 +23,14 @@ def _score_pairs(model, sources, translations, references, batch_size=8):
             "mt": mt or "",
             "ref": ref or "",
         })
-    output = model.predict(records, batch_size=batch_size, gpus=0)
+    output = model.predict(records, batch_size=batch_size)
     return output.scores
 
 
-def compute_comet_scores(results_by_service, oracle_results, europarl_data,
-                         model_name: str = "Unbabel/wmt22-comet-da",
-                         batch_size: int = 8):
+def compute_comet_rows(results_by_service, oracle_results, europarl_data,
+                       model_name: str = "Unbabel/wmt22-comet-da",
+                       batch_size: int = 8):
+    """Long-format per-sample COMET rows for write_accuracy(...)."""
     if not results_by_service:
         raise ValueError("No translation results provided for COMET scoring.")
 
@@ -43,45 +45,33 @@ def compute_comet_scores(results_by_service, oracle_results, europarl_data,
     model_path = download_model(model_name)
     model = load_from_checkpoint(model_path)
 
-    service_names = list(outputs_by_service.keys())
-    data = {"id": []}
-    for name in service_names:
-        data[f"{name}_oracle_comet"] = []
-        data[f"{name}_human_comet"] = []
-
-    data["id"] = sample_keys
-
+    rows = []
     for name, outputs in outputs_by_service.items():
         translations = [outputs.get(sample_key, "") for sample_key in sample_keys]
         oracle_refs = [oracle_by_id.get(sample_key, "") for sample_key in sample_keys]
 
-        oracle_scores = _score_pairs(
-            model,
-            sources,
-            translations,
-            oracle_refs,
-            batch_size=batch_size,
-        )
-        human_scores = _score_pairs(
-            model,
-            sources,
-            translations,
-            human_refs,
-            batch_size=batch_size,
-        )
+        oracle_scores = _score_pairs(model, sources, translations, oracle_refs, batch_size=batch_size)
+        human_scores = _score_pairs(model, sources, translations, human_refs, batch_size=batch_size)
 
-        data[f"{name}_oracle_comet"] = list(oracle_scores)
-        data[f"{name}_human_comet"] = list(human_scores)
-
-    return pd.DataFrame(data)
+        for sample_key, o_score, h_score in zip(sample_keys, oracle_scores, human_scores):
+            rows.append({
+                "id": sample_key,
+                "service": name,
+                "oracle_comet": float(o_score),
+                "human_comet": float(h_score),
+            })
+    return rows
 
 
-def compute_comet_summary(comet_scores_df, service_names):
-    summary = {"service": [], "oracle_comet": [], "human_comet": []}
+def compute_comet_summary_rows(per_sample_rows, service_names):
+    df = pd.DataFrame(per_sample_rows)
+    out = []
     for name in service_names:
-        oracle_scores = comet_scores_df[f"{name}_oracle_comet"]
-        human_scores = comet_scores_df[f"{name}_human_comet"]
-        summary["service"].append(name)
-        summary["oracle_comet"].append(oracle_scores.mean())
-        summary["human_comet"].append(human_scores.mean())
-    return pd.DataFrame(summary)
+        slice_df = df[df["service"] == name]
+        out.append({
+            "service": name,
+            "oracle_comet": float(slice_df["oracle_comet"].mean()) if not slice_df.empty else None,
+            "human_comet": float(slice_df["human_comet"].mean()) if not slice_df.empty else None,
+            "n_samples": int(len(slice_df)),
+        })
+    return out

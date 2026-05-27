@@ -2,7 +2,7 @@ speech_recognition:
   google_cloud_stt:
     enabled: true
   assemblyai:
-    enabled: false
+    enabled: true
   aws_transcribe:
     enabled: true
   ibm_watson_stt:
@@ -21,12 +21,10 @@ language_translation:
     enabled: true
   deepl_translation:
     enabled: true
-  ibm_watson_translator:
-    enabled: false
   apptek:
-    enabled: false
+    enabled: true
   modern_mt:
-    enabled: false
+    enabled: true
 
 emotion_detection:
   faceplusplus:

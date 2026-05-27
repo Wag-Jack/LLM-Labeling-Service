@@ -1,0 +1,16 @@
+Please act as a facial emotion recognition system and classify the face in the following image across seven emotion classes: anger, disgust, fear, happiness, neutral, sadness, surprise.
+You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.
+JSON schema:
+{
+  "scores": {
+    "anger": float, "disgust": float, "fear": float, "happiness": float,
+    "neutral": float, "sadness": float, "surprise": float
+  }
+}
+Rules:
+- Each score is a float in 0.0-1.0 and the seven scores must sum to 1.0.
+- Base your judgment on visible facial cues only: eyes, brows, mouth, overall expression.
+- For ambiguous or occluded faces, distribute probability across plausible classes rather than committing to one.
+If you do not receive the image, set every score to null.
+Do NOT mention that you need the image, only give the JSON schema output.
+If you violate this, the output will be discarded.

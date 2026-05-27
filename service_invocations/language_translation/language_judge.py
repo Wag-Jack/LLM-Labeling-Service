@@ -1,110 +1,190 @@
-from dotenv import load_dotenv
-import json
-from openai import OpenAI
-import os
-import pandas as pd
+from __future__ import annotations
+
 from pathlib import Path
+import json
 
-load_dotenv
+import pandas as pd
+import yaml
 
-_RESULTS_DIR = (
-    Path.cwd()
-    / "service_invocations"
-    / "results"
-    / "language_translation"
-    / "services"
-)  # Task-scoped outputs.
+from service_invocations.core.cost_tracker import compute_cost, session_tracker
+from service_invocations.core.model_failover import run_with_failover
+from service_invocations.core.oracle_utils import (
+    load_prompt as _load_prompt,
+    normalize_id as _normalize_id,
+    resolve_prompt_path as _resolve_prompt_path,
+)
+from service_invocations.core.results_io import write_judge
+from service_invocations.models import get_enabled_models, get_model_generator
 
-def judge_translations(google_cloud, aws_translate, microsoft_translate, europarl_data):
-    _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    # Initiate OpenAI client
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+_PARADIGM_NAME = "judge"
+_TASK_NAME = "language_translation"
+_PROMPTS_ROOT = Path(__file__).parent / "prompts"
+_PARADIGM = "judge"
 
-    # Read each service's DataFrame for its id and French output
-    gc_french = dict(zip(google_cloud['id'], google_cloud['service_output']))
-    aws_french = dict(zip(aws_translate['id'], aws_translate['service_output']))
-    ms_french = dict(zip(microsoft_translate['id'], microsoft_translate['service_output']))
+_DEFAULT_TASK_DIR = (
+    Path.cwd() / "service_invocations" / "results" / "language_translation"
+)
 
-    # Retrieve all input from metadata as a list
-    english_input = europarl_data['english'].tolist()
-    ids = europarl_data['id'].tolist()
 
-    # Data dictionary for judging output
-    data = {
-        "id": [],
-        "gc_score": [],
-        "aws_score": [],
-        "ms_score": [],
-        "llm_translation": []
+def _load_enabled_entries(config_path: Path, task_name: str) -> list[str]:
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+    with config_path.open("r", encoding="utf-8") as f:
+        config = yaml.safe_load(f) or {}
+    if not isinstance(config, dict):
+        raise ValueError("Config root must be a mapping.")
+
+    task_cfg = config.get(task_name, {})
+    if not isinstance(task_cfg, dict):
+        raise ValueError(f"Config '{task_name}' must be a mapping.")
+
+    enabled = []
+    for name, entry in task_cfg.items():
+        if isinstance(entry, dict) and entry.get("enabled", False):
+            enabled.append(name)
+    return enabled
+
+
+def judge_translations(
+    results_by_service: dict[str, pd.DataFrame],
+    europarl_data: pd.DataFrame,
+    prompt_name: str,
+    results_dir: Path | None = None,
+    services_path: Path | None = None,
+    models_path: Path | None = None,
+    task_name: str = _TASK_NAME,
+):
+    task_dir = results_dir if results_dir is not None else _DEFAULT_TASK_DIR
+    if services_path is None:
+        services_path = Path.cwd() / "config" / "services.yaml"
+    if models_path is None:
+        models_path = Path.cwd() / "config" / "models.yaml"
+    task_dir.mkdir(parents=True, exist_ok=True)
+
+    prompt_path = _resolve_prompt_path(_PROMPTS_ROOT, _PARADIGM, prompt_name)
+
+    enabled_services = _load_enabled_entries(services_path, task_name)
+    enabled_models = get_enabled_models(models_path)
+
+    if not enabled_models:
+        print("--- Skipping LLM Judging (no enabled models) ---")
+        return None
+
+    services = {
+        name: df for name, df in results_by_service.items() if name in enabled_services
     }
+    if not services:
+        print("--- Skipping LLM Judging (no enabled service results) ---")
+        return None
 
-    for id, eng, gc, aws, ms in zip(ids, english_input, gc_french.keys(), aws_french.keys(), ms_french.keys()):
-        print(f"LLM Judging: {eng}")
-
-        # Set up prompt for the LLM
-        prompt = f"""
-                 You are acting as a judge for similar web services that are used for language translation.
-                 Each service receives an input of English text and will output a French translation.
-                 Your job is the following:
-                 1. Read in the English text.
-                 2. Give your French translation of the given English text that you will use to compare each service's output.
-                 3. For each service, give a score (1.0-10.0, scoring in intervals of 0.1) on what you believe is the accuracy of each output.
-                 You MUST return the output as a JSON object in the following format:
-                 LLM Transcript: (your transcript)
-                 Google Cloud Translate: (score from 1.0-10.0)
-                 AWS Translate: (score from 1.0-10.0)
-                 Microsoft Azure Translator: (score from 1.0-10.0)
-                 You MUST return ONLY valid JSON.
-                 Do not include markdown, code fences, or explanations.
-                 If you violate this, the output will be discarded.
-                 JSON scheme:
-                 {{
-                    "llm_translation": string|null,
-                    "google_cloud": number,
-                    "aws": number,
-                    "microsoft": number
-                 }}
-                 If you do not recieve the English input, enter the translation as 'n/a' and the scores as -1.
-                 Do NOT mention that you need the English input, only give the JSON schema output.
-                 Below are the services' transcript output:
-                 {gc}: {gc_french[gc]}
-                 {aws}: {aws_french[aws]}
-                 {ms}: {ms_french[ms]}
-                 """
-
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            modalities=['text'],
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt}
-                    ]
-                }
-            ]
+    translations_by_service = {}
+    for name, df in services.items():
+        if "id" not in df.columns or "service_output" not in df.columns:
+            raise ValueError(f"Missing required columns for {name}.")
+        translations_by_service[name] = dict(
+            zip(df["id"].map(_normalize_id), df["service_output"])
         )
 
-        # Compile JSON object from LLM output
-        print(f"{response.choices[0].message.content}")
-        llm_output = json.loads(response.choices[0].message.content)
+    english_input = europarl_data["english"].tolist()
+    ids = europarl_data["id"].tolist()
 
-        # Append data to resultant data dictionary
-        data['id'].append(f'{id:04d}')
-        data['gc_score'].append(llm_output['google_cloud'])
-        data['aws_score'].append(llm_output['aws'])
-        data['ms_score'].append(llm_output['microsoft'])
-        data['llm_translation'].append(llm_output['llm_translation'])
+    samples = [
+        {"id": sample_id, "english": english}
+        for sample_id, english in zip(ids, english_input)
+    ]
 
-    # For each service, update their respective score CSVs with LLM judge score
-    google_cloud = google_cloud.drop(columns=['llm_judge_score'])
-    google_cloud['llm_judge_score'] = data['gc_score']
-    google_cloud.to_csv(_RESULTS_DIR / "gc_trans.csv", index=False)
+    def make_processor(model_name: str):
+        generator = get_model_generator(model_name, models_path=models_path)
+        tracker = session_tracker()
 
-    aws_transcribe = aws_transcribe.drop(columns=['llm_judge_score'])
-    aws_transcribe['llm_judge_score'] = data['aws_score']
-    aws_transcribe.to_csv(_RESULTS_DIR / "aws_trans.csv", index=False)
+        def process(sample: dict) -> dict:
+            sample_id = sample["id"]
+            english = sample["english"]
+            id_key = _normalize_id(sample_id)
+            print(f"LLM Judging ({model_name}): {english}")
 
-    microsoft_translate = microsoft_translate.drop(columns=['llm_judge_score'])
-    microsoft_translate['llm_judge_score'] = data['ms_score']
-    microsoft_translate.to_csv(_RESULTS_DIR / "ms_trans.csv", index=False)
+            service_blocks = "\n".join(
+                f"{name}: {translations_by_service[name].get(id_key, '')}"
+                for name in services.keys()
+            )
+            prompt = _load_prompt(
+                prompt_path,
+                source_text=english,
+                service_blocks=service_blocks,
+            )
+
+            response = generator(prompt, inputs={"text": english})
+            content = response.content
+            print(content)
+            cost = compute_cost(
+                model_name, response.input_tokens, response.output_tokens, models_path
+            )
+            tracker.record(
+                task=task_name,
+                paradigm=_PARADIGM_NAME,
+                model=model_name,
+                sample_id=sample_id,
+                input_tokens=response.input_tokens,
+                output_tokens=response.output_tokens,
+                cost_usd=cost,
+            )
+
+            default_scores = {name: -1 for name in services.keys()}
+            try:
+                llm_output = json.loads(content)
+                if isinstance(llm_output, dict):
+                    scores = llm_output.get("scores", {})
+                else:
+                    scores = {}
+            except json.JSONDecodeError:
+                llm_output = {"llm_translation": "n/a"}
+                scores = {}
+
+            if not isinstance(scores, dict):
+                scores = {}
+
+            merged_scores = {**default_scores, **scores}
+            winner = llm_output.get("winner") if isinstance(llm_output, dict) else None
+            if winner is not None and winner not in services:
+                winner = None
+            return {
+                "id": id_key,
+                "llm_label": llm_output.get("llm_translation", "n/a"),
+                "winner": winner,
+                "scores": merged_scores,
+                "latency_ms": response.latency_ms,
+                "input_tokens": response.input_tokens,
+                "output_tokens": response.output_tokens,
+                "cost_usd": cost,
+            }
+
+        return process
+
+    def on_progress(model_name: str, rows: list[dict], is_final: bool) -> None:
+        long_rows: list[dict] = []
+        for r in rows:
+            scores = r.get("scores") or {}
+            winner = r.get("winner")
+            for service_name in services.keys():
+                long_rows.append({
+                    "id": r["id"],
+                    "service": service_name,
+                    "score": scores.get(service_name, -1),
+                    "is_winner": winner == service_name if winner is not None else False,
+                    "llm_label": r.get("llm_label", "n/a"),
+                    "winner": winner,
+                    "latency_ms": r.get("latency_ms"),
+                    "input_tokens": r.get("input_tokens"),
+                    "output_tokens": r.get("output_tokens"),
+                    "cost_usd": r.get("cost_usd"),
+                })
+        write_judge(task_dir, task_name, prompt_name, model_name, long_rows)
+
+    run_with_failover(
+        models=enabled_models,
+        samples=samples,
+        make_processor=make_processor,
+        on_progress=on_progress,
+    )
+
+    return True

@@ -4,20 +4,157 @@ from dataclasses import dataclass
 import json
 import base64
 import os
+import random
+import socket
+import sys
 from pathlib import Path
 import time
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Tuple
 from urllib import error as url_error
 from urllib import request as url_request
 
 from dotenv import load_dotenv
-from openai import OpenAI
 
 load_dotenv()
 
 
 class UnsupportedProviderError(RuntimeError):
     pass
+
+
+class ModelUnavailableError(RuntimeError):
+    """Raised after retries are exhausted on a transient/retryable error.
+
+    Callers (e.g., the failover runner) can catch this to defer remaining
+    work for the model and proceed with the next one. Non-retryable errors
+    are not wrapped — they propagate as-is.
+    """
+
+    def __init__(self, model_id: str, original: BaseException):
+        super().__init__(f"Model '{model_id}' unavailable after retries: {original}")
+        self.model_id = model_id
+        self.original = original
+
+
+_RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504, 529}
+_RETRYABLE_KEYWORDS = (
+    "503",
+    "502",
+    "504",
+    "429",
+    "unavailable",
+    "overloaded",
+    "temporarily",
+    "timeout",
+    "timed out",
+    "deadline",
+    "rate limit",
+    "rate-limit",
+    "resource exhausted",
+    "connection reset",
+    "connection aborted",
+    "remote end closed",
+    "internal server error",
+    "bad gateway",
+    "gateway timeout",
+)
+
+_DEFAULT_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "6"))
+_DEFAULT_BASE_DELAY = float(os.getenv("LLM_RETRY_BASE_DELAY", "2.0"))
+_DEFAULT_MAX_DELAY = float(os.getenv("LLM_RETRY_MAX_DELAY", "60.0"))
+_DEFAULT_REQUEST_TIMEOUT = float(os.getenv("LLM_REQUEST_TIMEOUT", "120.0"))
+
+
+def _parse_retry_after(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _classify_exception(exc: BaseException) -> Tuple[bool, float | None]:
+    """Return (is_retryable, suggested_delay_seconds)."""
+    if isinstance(exc, url_error.HTTPError):
+        if exc.code in _RETRYABLE_STATUS_CODES:
+            retry_after = None
+            if getattr(exc, "headers", None) is not None:
+                retry_after = exc.headers.get("Retry-After")
+            return True, _parse_retry_after(retry_after)
+        return False, None
+
+    if isinstance(exc, (socket.timeout, TimeoutError, ConnectionError)):
+        return True, None
+
+    if isinstance(exc, url_error.URLError):
+        return True, None
+
+    status_code = (
+        getattr(exc, "code", None)
+        or getattr(exc, "status_code", None)
+        or getattr(exc, "status", None)
+        or getattr(exc, "http_status", None)
+    )
+    if isinstance(status_code, int) and status_code in _RETRYABLE_STATUS_CODES:
+        retry_after = None
+        response = getattr(exc, "response", None)
+        if response is not None:
+            headers = getattr(response, "headers", None)
+            if headers is not None:
+                try:
+                    retry_after = headers.get("Retry-After")
+                except Exception:
+                    retry_after = None
+        return True, _parse_retry_after(retry_after)
+
+    message = str(exc).lower()
+    if any(keyword in message for keyword in _RETRYABLE_KEYWORDS):
+        return True, None
+
+    return False, None
+
+
+def _retry_call(
+    func: Callable[[], Any],
+    *,
+    description: str,
+    model_id: str,
+    max_retries: int = _DEFAULT_MAX_RETRIES,
+    base_delay: float = _DEFAULT_BASE_DELAY,
+    max_delay: float = _DEFAULT_MAX_DELAY,
+) -> Any:
+    attempt = 0
+    while True:
+        try:
+            return func()
+        except Exception as exc:
+            retryable, suggested = _classify_exception(exc)
+            if not retryable:
+                raise
+            if attempt >= max_retries:
+                print(
+                    f"[llm-retry] {description} exhausted {max_retries + 1} attempts; "
+                    f"marking model unavailable. Last error: "
+                    f"{type(exc).__name__}: {exc}.",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                raise ModelUnavailableError(model_id, exc) from exc
+            if suggested is not None and suggested > 0:
+                delay = min(suggested, max_delay)
+            else:
+                delay = min(base_delay * (2 ** attempt), max_delay)
+            delay += random.uniform(0, max(0.25, delay * 0.25))
+            print(
+                f"[llm-retry] {description} failed "
+                f"(attempt {attempt + 1}/{max_retries + 1}): "
+                f"{type(exc).__name__}: {exc}. Retrying in {delay:.1f}s.",
+                file=sys.stderr,
+                flush=True,
+            )
+            time.sleep(delay)
+            attempt += 1
 
 
 @dataclass(frozen=True)
@@ -109,122 +246,6 @@ def _extract_realtime_text(response: Dict[str, Any] | None) -> str:
     return "".join(chunks).strip()
 
 
-class OpenAIAdapter:
-    def __init__(self) -> None:
-        self._client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-    def generate(self, model: str, prompt: str, inputs: Dict[str, Any],
-                 modalities: List[str], temperature: float = 0.0) -> LLMResponse:
-        if _is_realtime_model(model):
-            return self._generate_realtime(model, prompt, inputs, temperature)
-        messages = _build_openai_messages(prompt, inputs)
-        start_time = time.perf_counter()
-        response = self._client.chat.completions.create(
-            model=model,
-            modalities=modalities,
-            messages=messages,
-            temperature=temperature,
-        )
-        latency_ms = (time.perf_counter() - start_time) * 1000.0
-        usage = getattr(response, "usage", None)
-        input_tokens = getattr(usage, "input_tokens", None)
-        output_tokens = getattr(usage, "output_tokens", None)
-        prompt_tokens = getattr(usage, "prompt_tokens", None)
-        completion_tokens = getattr(usage, "completion_tokens", None)
-        if input_tokens is None:
-            input_tokens = prompt_tokens
-        if output_tokens is None:
-            output_tokens = completion_tokens
-        content = response.choices[0].message.content
-        return LLMResponse(
-            content=content,
-            latency_ms=round(latency_ms, 2),
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-        )
-
-    def _generate_realtime(self, model: str, prompt: str, inputs: Dict[str, Any],
-                           temperature: float = 0.6) -> LLMResponse:
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise UnsupportedProviderError(
-                "OpenAI adapter requires OPENAI_API_KEY for realtime connections."
-            )
-        try:
-            import websocket  # type: ignore
-        except Exception as exc:  # pragma: no cover - import guard
-            raise UnsupportedProviderError(
-                "Realtime OpenAI connections require the websocket-client package."
-            ) from exc
-
-        url = f"wss://api.openai.com/v1/realtime?model={model}"
-        headers = [f"Authorization: Bearer {api_key}"]
-
-        ws = websocket.WebSocket()
-        start_time = time.perf_counter()
-        ws.connect(url, header=headers)
-
-        try:
-            payload_inputs = inputs or {}
-            content_parts: List[Dict[str, Any]] = []
-            text_input = payload_inputs.get("text")
-            if text_input:
-                content_parts.append({"type": "input_text", "text": text_input})
-
-            audio_input = payload_inputs.get("audio")
-            if audio_input is not None:
-                audio_bytes = _read_bytes(audio_input)
-                audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-                content_parts.append({"type": "input_audio", "audio": audio_b64})
-
-            image_input = payload_inputs.get("image")
-            if image_input is not None:
-                image_bytes = _read_bytes(image_input)
-                image_format = payload_inputs.get("image_format") or _infer_format(image_input, "png")
-                image_b64 = base64.b64encode(image_bytes).decode("utf-8")
-                content_parts.append({
-                    "type": "input_image",
-                    "image_url": f"data:image/{image_format};base64,{image_b64}",
-                })
-
-            if content_parts:
-                ws.send(json.dumps({
-                    "type": "conversation.item.create",
-                    "item": {
-                        "type": "message",
-                        "role": "user",
-                        "content": content_parts,
-                    },
-                }))
-
-            ws.send(json.dumps({
-                "type": "response.create",
-                "response": {
-                    "output_modalities": ["text"],
-                    "instructions": prompt,
-                    "temperature": temperature,
-                },
-            }))
-
-            content = ""
-            while True:
-                raw = ws.recv()
-                event = json.loads(raw)
-                if event.get("type") == "response.done":
-                    content = _extract_realtime_text(event.get("response"))
-                    break
-        finally:
-            ws.close()
-
-        latency_ms = (time.perf_counter() - start_time) * 1000.0
-        return LLMResponse(
-            content=content,
-            latency_ms=round(latency_ms, 2),
-            input_tokens=None,
-            output_tokens=None,
-        )
-
-
 class GeminiAdapter:
     def __init__(self) -> None:
         api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
@@ -285,10 +306,14 @@ class GeminiAdapter:
                 ))
 
             contents = [self._types.Content(role="user", parts=parts)]
-            response = self._client.models.generate_content(
-                model=model,
-                contents=contents,
-                config=self._types.GenerateContentConfig(temperature=temperature),
+            response = _retry_call(
+                lambda: self._client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=self._types.GenerateContentConfig(temperature=temperature),
+                ),
+                description=f"Gemini generate_content ({model})",
+                model_id=model,
             )
             content = getattr(response, "text", None)
             if content is None and getattr(response, "candidates", None):
@@ -320,9 +345,13 @@ class GeminiAdapter:
                     mime_type=f"image/{image_format}",
                     data=image_bytes,
                 ))
-            response = model_client.generate_content(
-                parts,
-                generation_config={"temperature": temperature},
+            response = _retry_call(
+                lambda: model_client.generate_content(
+                    parts,
+                    generation_config={"temperature": temperature},
+                ),
+                description=f"Gemini generate_content ({model})",
+                model_id=model,
             )
             content = getattr(response, "text", None) or str(response)
 
@@ -350,27 +379,37 @@ class MicrosoftPhiAdapter:
         self._api_key = api_key
         self._target_uri = target_uri
 
-    def _post_json(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _post_json(self, payload: Dict[str, Any], model_id: str) -> Dict[str, Any]:
         data = json.dumps(payload).encode("utf-8")
         headers = {
             "Content-Type": "application/json",
             "api-key": self._api_key,
         }
-        req = url_request.Request(
-            self._target_uri,
-            data=data,
-            headers=headers,
-            method="POST",
+
+        def _do_request() -> bytes:
+            req = url_request.Request(
+                self._target_uri,
+                data=data,
+                headers=headers,
+                method="POST",
+            )
+            try:
+                with url_request.urlopen(req, timeout=_DEFAULT_REQUEST_TIMEOUT) as resp:
+                    return resp.read()
+            except url_error.HTTPError as exc:
+                if exc.code in _RETRYABLE_STATUS_CODES:
+                    raise
+                body = exc.read()
+                detail = body.decode("utf-8", errors="replace")
+                raise RuntimeError(
+                    f"Microsoft Phi request failed: HTTP {exc.code} {exc.reason} - {detail}"
+                ) from exc
+
+        body = _retry_call(
+            _do_request,
+            description=f"Microsoft Phi request ({model_id})",
+            model_id=model_id,
         )
-        try:
-            with url_request.urlopen(req) as resp:
-                body = resp.read()
-        except url_error.HTTPError as exc:
-            body = exc.read()
-            detail = body.decode("utf-8", errors="replace")
-            raise RuntimeError(
-                f"Microsoft Phi request failed: HTTP {exc.code} {exc.reason} - {detail}"
-            ) from exc
         return json.loads(body.decode("utf-8"))
 
     def generate(self, model: str, prompt: str, inputs: Dict[str, Any],
@@ -382,7 +421,7 @@ class MicrosoftPhiAdapter:
             "messages": messages,
             "temperature": temperature,
         }
-        response = self._post_json(payload)
+        response = self._post_json(payload, model_id=model)
         latency_ms = (time.perf_counter() - start_time) * 1000.0
         usage = response.get("usage") if isinstance(response, dict) else None
         input_tokens = None
@@ -438,10 +477,6 @@ def get_llm_adapter(provider: str) -> Any:
     provider_key = provider_aliases.get(provider_key, provider_key)
     adapter = _ADAPTER_CACHE.get(provider_key)
     if adapter is not None:
-        return adapter
-    if provider_key == "openai":
-        adapter = OpenAIAdapter()
-        _ADAPTER_CACHE[provider_key] = adapter
         return adapter
     if provider_key == "gemini":
         adapter = GeminiAdapter()
