@@ -9,11 +9,18 @@ import yaml
 from service_invocations.core.cost_tracker import compute_cost, session_tracker
 from service_invocations.core.model_failover import run_with_failover
 from service_invocations.core.oracle_utils import (
+    is_fresh_run_requested as _is_fresh_run_requested,
+    is_nullish_output as _is_nullish_output,
     load_prompt as _load_prompt,
     normalize_id as _normalize_id,
     resolve_prompt_path as _resolve_prompt_path,
+    retry_until_valid as _retry_until_valid,
 )
-from service_invocations.core.results_io import write_judge
+from service_invocations.core.results_io import (
+    clear_completed_slice,
+    load_completed_ids,
+    write_judge,
+)
 from service_invocations.models import get_enabled_models, get_model_generator
 
 _PARADIGM_NAME = "judge"
@@ -70,6 +77,7 @@ def judge_emotions(
     services_path: Path | None = None,
     models_path: Path | None = None,
     task_name: str = _TASK_NAME,
+    fresh_run: bool = False,
 ):
     task_dir = results_dir if results_dir is not None else _DEFAULT_TASK_DIR
     if services_path is None:
@@ -86,6 +94,15 @@ def judge_emotions(
     if not enabled_models:
         print("--- Skipping LLM Judging (no enabled models) ---")
         return None
+
+    fresh_run = _is_fresh_run_requested(fresh_run)
+    if fresh_run:
+        removed = clear_completed_slice(task_dir, "judge", prompt_name, enabled_models)
+        if removed:
+            print(
+                f"[fresh] emotion_judge: cleared {removed} prior row(s) "
+                f"for prompt='{prompt_name}'."
+            )
 
     services = {
         name: df for name, df in results_by_service.items() if name in enabled_services
@@ -113,11 +130,27 @@ def judge_emotions(
     def make_processor(model_name: str):
         generator = get_model_generator(model_name, models_path=models_path)
         tracker = session_tracker()
+        done_ids: set[str] = (
+            set()
+            if fresh_run
+            else set(load_completed_ids(task_dir, "judge", prompt_name, model_name))
+        )
+        if done_ids:
+            print(
+                f"[resume] emotion_judge {model_name}: "
+                f"{len(done_ids)} sample(s) already in CSV — will skip."
+            )
 
-        def process(sample: dict) -> dict:
+        def process(sample: dict) -> dict | None:
             sample_id = sample["id"]
             image_file = sample["image"]
             id_key = _normalize_id(sample_id)
+            if id_key in done_ids:
+                print(
+                    f"[resume] Skip emotion_judge ({model_name}) "
+                    f"sample={sample_id} (already done)."
+                )
+                return None
             print(f"LLM Judging ({model_name}): {image_file}")
 
             service_blocks = "\n".join(
@@ -126,9 +159,22 @@ def judge_emotions(
             )
             prompt = _load_prompt(prompt_path, service_blocks=service_blocks)
 
-            response = generator(prompt, inputs={"image": image_file})
-            content = response.content
-            print(content)
+            def _invoke_once():
+                resp = generator(prompt, inputs={"image": image_file})
+                print(resp.content)
+                try:
+                    parsed = json.loads(resp.content)
+                    if not isinstance(parsed, dict):
+                        parsed = {"llm_emotion": "n/a"}
+                except (json.JSONDecodeError, TypeError):
+                    parsed = {"llm_emotion": "n/a"}
+                return resp, parsed
+
+            response, llm_output = _retry_until_valid(
+                _invoke_once,
+                validate=lambda pair: not _is_nullish_output(pair[1].get("llm_emotion")),
+                description=f"emotion_judge {model_name} sample={sample_id}",
+            )
             cost = compute_cost(
                 model_name, response.input_tokens, response.output_tokens, models_path
             )
@@ -143,16 +189,7 @@ def judge_emotions(
             )
 
             default_scores = {name: -1 for name in services.keys()}
-            try:
-                llm_output = json.loads(content)
-                if isinstance(llm_output, dict):
-                    scores = llm_output.get("scores", {})
-                else:
-                    scores = {}
-            except json.JSONDecodeError:
-                llm_output = {"llm_emotion": "n/a"}
-                scores = {}
-
+            scores = llm_output.get("scores", {})
             if not isinstance(scores, dict):
                 scores = {}
 
@@ -160,6 +197,7 @@ def judge_emotions(
             winner = llm_output.get("winner") if isinstance(llm_output, dict) else None
             if winner is not None and winner not in services:
                 winner = None
+            done_ids.add(id_key)
             return {
                 "id": id_key,
                 "llm_label": llm_output.get("llm_emotion", "n/a"),

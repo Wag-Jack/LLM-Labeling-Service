@@ -37,5 +37,3 @@ emotion_detection:
     enabled: false
   luxand_facesdk:
     enabled: true
-  smartclick:
-    enabled: false

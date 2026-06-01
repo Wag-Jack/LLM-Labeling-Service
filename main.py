@@ -7,7 +7,7 @@ from data_management.vea import load_vea
 from benchmark_prompts import run_all_prompts
 
 # Amount of samples from each dataset to run through services
-NUM_SAMPLES = 100
+NUM_SAMPLES = 10
 # Randomization controls. Set RANDOM_SEED to an integer for reproducible draws,
 # or leave as None for a fresh random sample on every run.
 RANDOMIZE_SAMPLES = True

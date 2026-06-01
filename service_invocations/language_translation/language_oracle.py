@@ -6,11 +6,19 @@ from service_invocations.core.cost_tracker import compute_cost, session_tracker
 from service_invocations.core.model_failover import run_with_failover
 from service_invocations.core.oracle_utils import (
     extract_oracle as _extract_oracle,
+    is_fresh_run_requested as _is_fresh_run_requested,
+    is_nullish_output as _is_nullish_output,
     load_prompt as _load_prompt,
     normalize_id as _normalize_id,
     resolve_prompt_path as _resolve_prompt_path,
+    retry_until_valid as _retry_until_valid,
 )
-from service_invocations.core.results_io import write_oracle
+from service_invocations.core.results_io import (
+    clear_completed_slice,
+    load_completed_ids,
+    load_completed_rows,
+    write_oracle,
+)
 from service_invocations.models import get_enabled_models, get_model_generator
 
 _TASK_NAME = "language_translation"
@@ -30,6 +38,7 @@ def generate_oracle_translations(
     use_existing: bool = False,
     results_dir: Path | None = None,
     models_path: Path | None = None,
+    fresh_run: bool = False,
 ):
     task_dir = results_dir if results_dir is not None else _DEFAULT_TASK_DIR
     if models_path is None:
@@ -42,6 +51,21 @@ def generate_oracle_translations(
     if not enabled_models:
         print("Skipping LLM Oracle Translation (no enabled models).")
         return {}
+
+    fresh_run = _is_fresh_run_requested(fresh_run)
+    if fresh_run:
+        if use_existing:
+            print(
+                "[fresh] language_oracle: fresh_run=True overrides use_existing — "
+                "ignoring on-disk results."
+            )
+            use_existing = False
+        removed = clear_completed_slice(task_dir, "oracle", prompt_name, enabled_models)
+        if removed:
+            print(
+                f"[fresh] language_oracle: cleared {removed} prior row(s) "
+                f"for prompt='{prompt_name}'."
+            )
 
     results_by_model: dict[str, pd.DataFrame] = {}
 
@@ -68,16 +92,39 @@ def generate_oracle_translations(
         generator = get_model_generator(model_name, models_path=models_path)
         prompt = _load_prompt(prompt_path)
         tracker = session_tracker()
+        done_ids: set[str] = (
+            set()
+            if fresh_run
+            else set(load_completed_ids(task_dir, "oracle", prompt_name, model_name))
+        )
+        if done_ids:
+            print(
+                f"[resume] language_oracle {model_name}: "
+                f"{len(done_ids)} sample(s) already in CSV — will skip."
+            )
 
-        def process(sample: dict) -> dict:
+        def process(sample: dict) -> dict | None:
             sample_id = sample["id"]
             english_text = sample["english"]
+            id_key = _normalize_id(sample_id)
+            if id_key in done_ids:
+                print(
+                    f"[resume] Skip language_oracle ({model_name}) "
+                    f"sample={sample_id} (already done)."
+                )
+                return None
             print(f"LLM Oracle Translation ({model_name}): {sample_id}")
 
-            response = generator(prompt, inputs={"text": english_text})
-            content = response.content
-            print(content)
-            llm_oracle = _extract_oracle(content)
+            def _invoke_once():
+                resp = generator(prompt, inputs={"text": english_text})
+                print(resp.content)
+                return resp, _extract_oracle(resp.content)
+
+            response, llm_oracle = _retry_until_valid(
+                _invoke_once,
+                validate=lambda pair: not _is_nullish_output(pair[1]),
+                description=f"language_oracle {model_name} sample={sample_id}",
+            )
             cost = compute_cost(
                 model_name, response.input_tokens, response.output_tokens, models_path
             )
@@ -90,8 +137,9 @@ def generate_oracle_translations(
                 output_tokens=response.output_tokens,
                 cost_usd=cost,
             )
+            done_ids.add(id_key)
             return {
-                "id": _normalize_id(sample_id),
+                "id": id_key,
                 "llm_oracle": llm_oracle,
                 "latency_ms": response.latency_ms,
                 "input_tokens": response.input_tokens,
@@ -104,7 +152,10 @@ def generate_oracle_translations(
     def on_progress(model_name: str, rows: list[dict], is_final: bool) -> None:
         write_oracle(task_dir, _TASK_NAME, prompt_name, model_name, rows)
         if is_final:
-            results_by_model[model_name] = pd.DataFrame(rows)
+            full_slice = load_completed_rows(task_dir, "oracle", prompt_name, model_name)
+            results_by_model[model_name] = (
+                full_slice if not full_slice.empty else pd.DataFrame(rows)
+            )
 
     if pending_models:
         run_with_failover(

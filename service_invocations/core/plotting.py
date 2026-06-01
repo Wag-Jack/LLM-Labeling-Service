@@ -285,9 +285,12 @@ def _plot_cost_breakdown(task_dir: Path, task: str, paradigm: str, out_dir: Path
     if cost is None:
         return
     cost = cost[(cost["task"] == task) & (cost["paradigm"] == paradigm)]
+    # Drop unpriced / sentinel rows so they don't drag totals below zero.
+    cost = cost[cost["cost_usd"].fillna(-1) >= 0]
     if cost.empty:
         return
     grouped = cost.groupby("model")[["input_tokens", "output_tokens", "cost_usd"]].sum().reset_index()
+    grouped["cost_usd"] = grouped["cost_usd"].clip(lower=0)
     fig, ax = plt.subplots(figsize=(8, 5))
     width = 0.6
     x_pos = np.arange(len(grouped))
@@ -297,6 +300,7 @@ def _plot_cost_breakdown(task_dir: Path, task: str, paradigm: str, out_dir: Path
     ax.set_xticks(x_pos)
     ax.set_xticklabels(grouped["model"], rotation=30, ha="right")
     ax.set_ylabel("USD")
+    ax.set_ylim(bottom=0)
     ax.set_title(f"{task}/{paradigm} – LLM cost by model")
     fig.tight_layout()
     fig.savefig(out_dir / "cost_breakdown.png", dpi=150)
@@ -372,10 +376,11 @@ def _per_paradigm_cost(task_dir: Path, task: str) -> pd.DataFrame:
     cost = _read_csv_or_none(task_dir / "cost.csv")
     if cost is None:
         return pd.DataFrame(columns=["paradigm", "model", "cost_usd"])
-    cost = cost[cost["task"] == task]
+    cost = cost[(cost["task"] == task) & (cost["cost_usd"].fillna(-1) >= 0)]
     if cost.empty:
         return pd.DataFrame(columns=["paradigm", "model", "cost_usd"])
     grouped = cost.groupby(["paradigm", "model"])["cost_usd"].sum().reset_index()
+    grouped["cost_usd"] = grouped["cost_usd"].clip(lower=0)
     return grouped
 
 
@@ -385,7 +390,7 @@ def _plot_paradigm_pareto(task_dir: Path, task: str, out_dir: Path) -> None:
     if accuracy.empty:
         return
     merged = accuracy.merge(cost, on=["paradigm", "model"], how="left")
-    merged["cost_usd"] = merged["cost_usd"].fillna(0.0)
+    merged["cost_usd"] = merged["cost_usd"].fillna(0.0).clip(lower=0)
 
     fig, ax = plt.subplots(figsize=(9, 6))
     paradigms = merged["paradigm"].unique()
@@ -398,6 +403,7 @@ def _plot_paradigm_pareto(task_dir: Path, task: str, out_dir: Path) -> None:
                         xytext=(4, 4), textcoords="offset points", fontsize=7)
     ax.set_xlabel("USD spent on LLM calls")
     ax.set_ylabel("Label accuracy proxy (higher = better)")
+    ax.set_xlim(left=0)
     ax.set_title(f"{task} – accuracy vs cost across paradigms")
     ax.legend(loc="best", fontsize="small")
     fig.tight_layout()

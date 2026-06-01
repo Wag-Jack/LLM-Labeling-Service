@@ -117,6 +117,109 @@ def write_accuracy_summary(task_dir: Path, task: str, prompt: str, model: str, r
     _upsert(task_dir / "accuracy_summary.csv", df, ACCURACY_SUMMARY_KEY)
 
 
+_PARADIGM_FILES = {
+    "oracle": "oracle.csv",
+    "judge": "judge.csv",
+    "human_loop": "human_loop.csv",
+}
+
+
+def load_completed_ids(
+    task_dir: Path, paradigm: str, prompt: str, model: str
+) -> set[str]:
+    """Return the set of sample ids already present in the consolidated CSV
+    for the given (paradigm, prompt, model). Used by runners to skip work
+    that was already done — across runs, after crashes, or after the
+    failover queue gives up on a model.
+
+    ``paradigm`` must be one of ``"oracle"``, ``"judge"``, ``"human_loop"``.
+    """
+    filename = _PARADIGM_FILES.get(paradigm)
+    if filename is None:
+        raise ValueError(
+            f"load_completed_ids: unknown paradigm '{paradigm}'. "
+            f"Expected one of {sorted(_PARADIGM_FILES)}."
+        )
+    path = task_dir / filename
+    if not path.exists():
+        return set()
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return set()
+    if df.empty:
+        return set()
+    needed = {"prompt", "model", "id"}
+    if not needed.issubset(df.columns):
+        return set()
+    matched = df[(df["prompt"].astype(str) == str(prompt)) & (df["model"].astype(str) == str(model))]
+    if matched.empty:
+        return set()
+    return {str(v) for v in matched["id"].tolist()}
+
+
+def clear_completed_slice(
+    task_dir: Path, paradigm: str, prompt: str, models: Iterable[str]
+) -> int:
+    """Drop rows matching ``prompt`` and ``model in models`` from the
+    consolidated CSV for the given paradigm. Returns the number of rows
+    removed. No-op if the file is missing or nothing matches.
+
+    Used by the runners' ``fresh_run`` path to wipe prior results before a
+    clean re-run, so neither the resume guard nor downstream tabulation
+    picks up stale rows.
+    """
+    filename = _PARADIGM_FILES.get(paradigm)
+    if filename is None:
+        raise ValueError(
+            f"clear_completed_slice: unknown paradigm '{paradigm}'. "
+            f"Expected one of {sorted(_PARADIGM_FILES)}."
+        )
+    path = task_dir / filename
+    if not path.exists():
+        return 0
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return 0
+    if df.empty or "prompt" not in df.columns or "model" not in df.columns:
+        return 0
+    model_set = {str(m) for m in models}
+    if not model_set:
+        return 0
+    mask = (df["prompt"].astype(str) == str(prompt)) & df["model"].astype(str).isin(model_set)
+    removed = int(mask.sum())
+    if removed > 0:
+        df[~mask].reset_index(drop=True).to_csv(path, index=False)
+    return removed
+
+
+def load_completed_rows(
+    task_dir: Path, paradigm: str, prompt: str, model: str
+) -> pd.DataFrame:
+    """Return the slice of the consolidated CSV for the given (paradigm,
+    prompt, model). Returns an empty DataFrame if the file or slice is
+    missing. Used by oracle runners to repopulate results_by_model after a
+    resume."""
+    filename = _PARADIGM_FILES.get(paradigm)
+    if filename is None:
+        raise ValueError(
+            f"load_completed_rows: unknown paradigm '{paradigm}'. "
+            f"Expected one of {sorted(_PARADIGM_FILES)}."
+        )
+    path = task_dir / filename
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return pd.DataFrame()
+    if df.empty or not {"prompt", "model"}.issubset(df.columns):
+        return pd.DataFrame()
+    matched = df[(df["prompt"].astype(str) == str(prompt)) & (df["model"].astype(str) == str(model))]
+    return matched.reset_index(drop=True)
+
+
 __all__ = [
     "write_services",
     "write_oracle",
@@ -124,4 +227,7 @@ __all__ = [
     "write_human_loop",
     "write_accuracy",
     "write_accuracy_summary",
+    "load_completed_ids",
+    "load_completed_rows",
+    "clear_completed_slice",
 ]

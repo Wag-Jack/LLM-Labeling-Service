@@ -9,11 +9,18 @@ import yaml
 from service_invocations.core.cost_tracker import compute_cost, session_tracker
 from service_invocations.core.model_failover import run_with_failover
 from service_invocations.core.oracle_utils import (
+    is_fresh_run_requested as _is_fresh_run_requested,
+    is_nullish_output as _is_nullish_output,
     load_prompt as _load_prompt,
     normalize_id as _normalize_id,
     resolve_prompt_path as _resolve_prompt_path,
+    retry_until_valid as _retry_until_valid,
 )
-from service_invocations.core.results_io import write_human_loop
+from service_invocations.core.results_io import (
+    clear_completed_slice,
+    load_completed_ids,
+    write_human_loop,
+)
 from service_invocations.models import get_enabled_models, get_model_generator
 
 _PARADIGM_NAME = "human_loop"
@@ -56,6 +63,7 @@ def human_loop_translations(
     services_path: Path | None = None,
     models_path: Path | None = None,
     task_name: str = _TASK_NAME,
+    fresh_run: bool = False,
 ):
     task_dir = results_dir if results_dir is not None else _DEFAULT_TASK_DIR
     if services_path is None:
@@ -72,6 +80,15 @@ def human_loop_translations(
     if not enabled_models:
         print("--- Skipping LLM Human-Loop (no enabled models) ---")
         return None
+
+    fresh_run = _is_fresh_run_requested(fresh_run)
+    if fresh_run:
+        removed = clear_completed_slice(task_dir, "human_loop", prompt_name, enabled_models)
+        if removed:
+            print(
+                f"[fresh] language_human_loop: cleared {removed} prior row(s) "
+                f"for prompt='{prompt_name}'."
+            )
 
     services = {
         name: df for name, df in results_by_service.items() if name in enabled_services
@@ -102,11 +119,27 @@ def human_loop_translations(
     def make_processor(model_name: str):
         generator = get_model_generator(model_name, models_path=models_path)
         tracker = session_tracker()
+        done_ids: set[str] = (
+            set()
+            if fresh_run
+            else set(load_completed_ids(task_dir, "human_loop", prompt_name, model_name))
+        )
+        if done_ids:
+            print(
+                f"[resume] language_human_loop {model_name}: "
+                f"{len(done_ids)} sample(s) already in CSV — will skip."
+            )
 
-        def process(sample: dict) -> dict:
+        def process(sample: dict) -> dict | None:
             sample_id = sample["id"]
             english = sample["english"]
             id_key = _normalize_id(sample_id)
+            if id_key in done_ids:
+                print(
+                    f"[resume] Skip language_human_loop ({model_name}) "
+                    f"sample={sample_id} (already done)."
+                )
+                return None
             print(f"LLM Human-Loop ({model_name}): {english}")
 
             service_blocks = "\n".join(
@@ -119,9 +152,22 @@ def human_loop_translations(
                 service_blocks=service_blocks,
             )
 
-            response = generator(prompt, inputs={"text": english})
-            content = response.content
-            print(content)
+            def _invoke_once():
+                resp = generator(prompt, inputs={"text": english})
+                print(resp.content)
+                try:
+                    parsed = json.loads(resp.content)
+                    if not isinstance(parsed, dict):
+                        parsed = {}
+                except (json.JSONDecodeError, TypeError):
+                    parsed = {}
+                return resp, parsed
+
+            response, llm_output = _retry_until_valid(
+                _invoke_once,
+                validate=lambda pair: not _is_nullish_output(pair[1].get("llm_translation")),
+                description=f"language_human_loop {model_name} sample={sample_id}",
+            )
             cost = compute_cost(
                 model_name, response.input_tokens, response.output_tokens, models_path
             )
@@ -136,13 +182,6 @@ def human_loop_translations(
             )
 
             default_scores = {name: -1 for name in services.keys()}
-            try:
-                llm_output = json.loads(content)
-                if not isinstance(llm_output, dict):
-                    llm_output = {}
-            except json.JSONDecodeError:
-                llm_output = {}
-
             scores = llm_output.get("scores", {})
             if not isinstance(scores, dict):
                 scores = {}
@@ -165,6 +204,7 @@ def human_loop_translations(
             if winner is not None and winner not in services:
                 winner = None
 
+            done_ids.add(id_key)
             return {
                 "id": id_key,
                 "llm_label": llm_translation,
