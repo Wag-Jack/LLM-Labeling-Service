@@ -118,7 +118,7 @@ def generate_oracle_transcripts(
             def _invoke_once():
                 resp = generator(prompt, inputs={"audio": audio_file})
                 print(resp.content)
-                return resp, _extract_oracle(resp.content)
+                return resp, _extract_oracle(resp.content, key="transcript")
 
             response, llm_oracle = _retry_until_valid(
                 _invoke_once,

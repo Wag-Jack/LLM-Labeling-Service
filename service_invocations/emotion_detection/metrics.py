@@ -12,6 +12,7 @@ imbalanced confusion matrices are still comparable.
 """
 from __future__ import annotations
 
+import ast
 import json
 from typing import Dict, List, Sequence
 
@@ -54,6 +55,67 @@ def _normalize_label(value) -> str:
         return ""
     text = str(value).strip().lower()
     return text
+
+
+# The FER oracle prompt reports scores under "happiness"/"sadness", while
+# service predictions use the canonical "happy"/"sad". Align them so the
+# oracle's argmax class matches the prediction vocabulary.
+_ORACLE_LABEL_ALIASES = {
+    "happiness": "happy",
+    "happy": "happy",
+    "sadness": "sad",
+    "sad": "sad",
+    "angry": "anger",
+    "disgusted": "disgust",
+}
+
+
+def _coerce_scores(value):
+    """Return a dict of emotion scores from a dict, JSON string, or Python repr."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            parsed = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            try:
+                parsed = ast.literal_eval(text)
+            except (ValueError, SyntaxError):
+                return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
+
+
+def _oracle_top_emotion(value) -> str:
+    """Argmax canonical emotion from the oracle's score distribution.
+
+    The FER oracle returns a probability distribution over emotion classes, so
+    the label comparable to a service's top-1 prediction is the highest-scoring
+    class. If the value is not a score mapping (e.g. a plain label), it is
+    normalized as a label string instead.
+    """
+    scores = _coerce_scores(value)
+    if scores is None:
+        return _normalize_label(value)
+    best_name = None
+    best_score = None
+    for name, score in scores.items():
+        if score is None:
+            continue
+        try:
+            score_f = float(score)
+        except (TypeError, ValueError):
+            continue
+        if best_score is None or score_f > best_score:
+            best_score = score_f
+            best_name = name
+    if best_name is None:
+        return ""
+    key = str(best_name).strip().lower()
+    return _ORACLE_LABEL_ALIASES.get(key, key)
 
 
 def _build_predictions_by_service(results_by_service):
@@ -163,7 +225,7 @@ def compute_emotion_rows(
     oracle_by_id = dict(
         zip(
             oracle_results["id"].map(_normalize_id),
-            oracle_results["llm_oracle"].map(_normalize_label),
+            oracle_results["llm_oracle"].map(_oracle_top_emotion),
         )
     )
 

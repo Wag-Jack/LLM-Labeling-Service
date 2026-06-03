@@ -3,6 +3,7 @@ You MUST return ONLY valid JSON. Do not include markdown, code fences, or explan
 JSON schema:
 {
   "llm_emotion": string,
+  "winner": string (name of the best system; must match a name below, or null if you defer),
   "scores": { "<service_name>": float in 0.0-1.0, ... one entry per system below ... },
   "confidence": float in 0.0-1.0,
   "defer_to_human": bool
@@ -10,7 +11,7 @@ JSON schema:
 Use the system names below verbatim as keys of "scores"; include every system.
 Systems (name: output):
 {service_blocks}
-Estimate confidence as a float in 0.0-1.0. Set defer_to_human to true when confidence is below 0.6 - for example when the face is ambiguous, the systems are similar, or visible cues conflict. The "llm_emotion" field should still record your best guess.
-If you do not receive the image, set "llm_emotion" to null, every score in "scores" to null, and defer_to_human to true.
+Estimate confidence as a float in 0.0-1.0. Set defer_to_human to true when confidence is below 0.6 - for example when the face is ambiguous, the systems are similar, or visible cues conflict. The "llm_emotion" field should still record your best guess. Set "winner" to the highest-scoring system, or to null when you defer.
+If you do not receive the image, set "llm_emotion" to null, "winner" to null, every score in "scores" to null, and defer_to_human to true.
 Do NOT mention that you need the image, only give the JSON schema output.
 If you violate this, the output will be discarded.

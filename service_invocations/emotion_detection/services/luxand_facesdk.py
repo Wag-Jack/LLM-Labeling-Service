@@ -10,6 +10,7 @@ from service_invocations.emotion_detection.services._shared import (
     build_service_output,
     label_to_name,
     normalize_emotions,
+    request_with_retry,
 )
 
 load_dotenv()
@@ -80,7 +81,8 @@ def run_luxand_facesdk(vea_data, results_path: Path | None = None):
                 image_bytes = f.read()
 
             start_time = time.perf_counter()
-            response = requests.post(
+            response = request_with_retry(
+                "POST",
                 url,
                 headers={"token": api_token},
                 files={"photo": image_bytes},
@@ -105,5 +107,5 @@ def run_luxand_facesdk(vea_data, results_path: Path | None = None):
     return df
 
 
-def run(vea_data):
-    return run_luxand_facesdk(vea_data)
+def run(vea_data, results_path=None):
+    return run_luxand_facesdk(vea_data, results_path=results_path)

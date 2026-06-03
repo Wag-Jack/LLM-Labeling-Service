@@ -356,12 +356,45 @@ class GeminiAdapter:
             content = getattr(response, "text", None) or str(response)
 
         latency_ms = (time.perf_counter() - start_time) * 1000.0
+        input_tokens, output_tokens = _extract_gemini_usage(response)
         return LLMResponse(
             content=content,
             latency_ms=round(latency_ms, 2),
-            input_tokens=None,
-            output_tokens=None,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         )
+
+
+def _extract_gemini_usage(response: Any) -> tuple[int | None, int | None]:
+    """Pull prompt/output token counts off a Gemini response.
+
+    Both the legacy google-generativeai SDK and the newer google-genai SDK
+    expose token usage on a ``usage_metadata`` attribute (or dict). Field names
+    differ slightly across SDK versions, so try several.
+    """
+    usage = getattr(response, "usage_metadata", None)
+    if usage is None and isinstance(response, dict):
+        usage = response.get("usage_metadata") or response.get("usage")
+    if usage is None:
+        return None, None
+
+    def _get(obj: Any, *keys: str) -> int | None:
+        for key in keys:
+            value = None
+            if isinstance(obj, dict):
+                value = obj.get(key)
+            else:
+                value = getattr(obj, key, None)
+            if value is not None:
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    continue
+        return None
+
+    input_tokens = _get(usage, "prompt_token_count", "input_token_count", "input_tokens", "prompt_tokens")
+    output_tokens = _get(usage, "candidates_token_count", "output_token_count", "output_tokens", "completion_tokens")
+    return input_tokens, output_tokens
 
 
 class MicrosoftPhiAdapter:

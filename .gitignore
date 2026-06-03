@@ -7,3 +7,4 @@ __pycache__
 *.csv/
 .claude
 */results
+/invocation_report

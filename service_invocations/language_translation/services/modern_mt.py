@@ -46,5 +46,5 @@ def run_modern_mt(europarl_data, results_path: Path | None = None):
     return df
 
 
-def run(europarl_data):
-    return run_modern_mt(europarl_data)
+def run(europarl_data, results_path=None):
+    return run_modern_mt(europarl_data, results_path=results_path)

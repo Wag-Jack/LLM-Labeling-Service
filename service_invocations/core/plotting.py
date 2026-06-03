@@ -80,12 +80,16 @@ def _grouped_bar(ax, df: pd.DataFrame, x: str, y: str, hue: str, ylabel: str) ->
     bar_width = 0.8 / max(len(hue_labels), 1)
     x_pos = np.arange(len(x_labels))
     for i, hue_val in enumerate(hue_labels):
-        ax.bar(
+        values = pivot[hue_val].values
+        bars = ax.bar(
             x_pos + i * bar_width - 0.4 + bar_width / 2,
-            pivot[hue_val].values,
+            values,
             width=bar_width,
             label=str(hue_val),
         )
+        # Annotate each bar with its exact value (thousandths); skip NaN bars.
+        value_labels = ["" if pd.isna(v) else f"{v:.3f}" for v in values]
+        ax.bar_label(bars, labels=value_labels, padding=2, fontsize=6, rotation=90)
     ax.set_xticks(x_pos)
     ax.set_xticklabels(x_labels, rotation=30, ha="right")
     ax.set_ylabel(ylabel)
@@ -157,6 +161,7 @@ def plot_oracle_bundle(task_dir: Path, task: str) -> None:
 
     fig, ax = plt.subplots(figsize=(10, 5))
     _grouped_bar(ax, summary, x="service", y=cfg["metric_col"], hue="model", ylabel=cfg["ylabel"])
+    ax.margins(y=0.15)  # headroom for vertical value labels
     ax.set_title(f"{task} – service accuracy vs human reference (by oracle LLM)")
     fig.tight_layout()
     fig.savefig(out_dir / "accuracy_by_service.png", dpi=150)
@@ -174,6 +179,7 @@ def plot_oracle_bundle(task_dir: Path, task: str) -> None:
     })
     fig, ax = plt.subplots(figsize=(10, 5))
     _grouped_bar(ax, long, x="service", y="metric", hue="reference", ylabel=cfg["ylabel"])
+    ax.margins(y=0.15)  # headroom for vertical value labels
     ax.set_title(f"{task} – oracle-ref vs human-ref consistency")
     fig.tight_layout()
     fig.savefig(out_dir / "consistency_oracle_vs_human.png", dpi=150)
@@ -215,7 +221,7 @@ def plot_human_loop_bundle(task_dir: Path, task: str) -> None:
         _grouped_bar(ax, fallback, x="model", y="fallback_used", hue="prompt",
                      ylabel="Fraction of samples that fell back to human")
         ax.set_title(f"{task} – human-loop fallback rate")
-        ax.set_ylim(0, 1)
+        ax.set_ylim(0, 1.12)  # headroom for vertical value labels
         fig.tight_layout()
         fig.savefig(out_dir / "human_fallback_rate.png", dpi=150)
         plt.close(fig)
@@ -252,7 +258,7 @@ def _plot_winner_and_consistency(paradigm_df: pd.DataFrame, task_dir: Path, task
         fig, ax = plt.subplots(figsize=(10, 5))
         _grouped_bar(ax, rates, x="service", y="win_rate", hue="model",
                      ylabel="Fraction of samples picked as winner")
-        ax.set_ylim(0, 1)
+        ax.set_ylim(0, 1.12)  # headroom for vertical value labels
         ax.set_title(f"{task} – {paradigm_label}: LLM winner rate by service")
         fig.tight_layout()
         fig.savefig(out_dir / "winner_rate_by_service.png", dpi=150)
@@ -273,7 +279,7 @@ def _plot_winner_and_consistency(paradigm_df: pd.DataFrame, task_dir: Path, task
     fig, ax = plt.subplots(figsize=(9, 5))
     _grouped_bar(ax, per_m, x="model", y="correct", hue="prompt",
                  ylabel="Winner matches actually-best service (per human ref)")
-    ax.set_ylim(0, 1)
+    ax.set_ylim(0, 1.12)  # headroom for vertical value labels
     ax.set_title(f"{task} – {paradigm_label}: winner vs human-best service")
     fig.tight_layout()
     fig.savefig(out_dir / "consistency_with_human.png", dpi=150)
@@ -450,7 +456,7 @@ def _plot_paradigm_consistency(task_dir: Path, task: str, out_dir: Path) -> None
     fig, ax = plt.subplots(figsize=(9, 5))
     _grouped_bar(ax, df, x="model", y="agreement", hue="paradigm",
                  ylabel="LLM winner matches actually-best service (per human ref)")
-    ax.set_ylim(0, 1)
+    ax.set_ylim(0, 1.12)  # headroom for vertical value labels
     ax.set_title(f"{task} – winner-pick agreement with human reference")
     fig.tight_layout()
     fig.savefig(out_dir / "paradigm_human_consistency.png", dpi=150)

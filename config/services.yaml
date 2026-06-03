@@ -22,18 +22,16 @@ language_translation:
   deepl_translation:
     enabled: true
   apptek:
-    enabled: true
+    enabled: false
   modern_mt:
     enabled: true
 
 emotion_detection:
   faceplusplus:
-    enabled: true
+    enabled: false
   microsoft_azure_face:
-    enabled: true
+    enabled: false
   aws_rekognition:
-    enabled: true
-  smartclick:
     enabled: false
   luxand_facesdk:
-    enabled: true
+    enabled: false

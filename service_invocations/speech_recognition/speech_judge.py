@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import json
 
 import pandas as pd
 import yaml
@@ -13,6 +12,7 @@ from service_invocations.core.oracle_utils import (
     is_nullish_output as _is_nullish_output,
     load_prompt as _load_prompt,
     normalize_id as _normalize_id,
+    parse_json_payload as _parse_json_payload,
     resolve_prompt_path as _resolve_prompt_path,
     retry_until_valid as _retry_until_valid,
 )
@@ -145,13 +145,7 @@ def judge_transcripts(
             def _invoke_once():
                 resp = generator(prompt, inputs={"audio": wav})
                 print(resp.content)
-                try:
-                    parsed = json.loads(resp.content)
-                    if not isinstance(parsed, dict):
-                        parsed = {"llm_transcript": "n/a"}
-                except (json.JSONDecodeError, TypeError):
-                    parsed = {"llm_transcript": "n/a"}
-                return resp, parsed
+                return resp, _parse_json_payload(resp.content)
 
             response, llm_output = _retry_until_valid(
                 _invoke_once,
@@ -203,7 +197,7 @@ def judge_transcripts(
                 long_rows.append({
                     "id": r["id"],
                     "service": service_name,
-                    "score": scores.get(service_name, -1),
+                    "score": scores.get(service_name) if scores.get(service_name) is not None else -1,
                     "is_winner": winner == service_name if winner is not None else False,
                     "llm_label": r.get("llm_label", "n/a"),
                     "winner": winner,

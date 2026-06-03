@@ -38,7 +38,30 @@ def _strip_code_fence(content: str) -> str:
     return match.group(1) if match else content
 
 
-def extract_oracle(content: str) -> str:
+def parse_json_payload(content: str) -> dict:
+    """Strip an optional ```json ... ``` fence and parse the response as a dict.
+
+    Returns ``{}`` when the content is missing, malformed, or not a JSON object.
+    Use this instead of bare ``json.loads(resp.content)`` so callers tolerate
+    models that wrap their output in markdown fences.
+    """
+    if content is None:
+        return {}
+    try:
+        payload = json.loads(_strip_code_fence(content).strip())
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def extract_oracle(content: str, key: str = "llm_oracle") -> Any:
+    """Extract the oracle payload from a model response.
+
+    ``key`` is the JSON field the prompt instructs the model to return
+    (e.g. ``"transcript"`` for ASR, ``"translation"`` for MT, ``"scores"``
+    for emotion). If the response can't be parsed or the key is missing,
+    returns ``"n/a"`` so ``is_nullish_output`` can route it through retry.
+    """
     if content is None:
         return "n/a"
     candidate = _strip_code_fence(content).strip()
@@ -48,7 +71,7 @@ def extract_oracle(content: str) -> str:
         return "n/a"
     if not isinstance(payload, dict):
         return "n/a"
-    return payload.get("llm_oracle", "n/a")
+    return payload.get(key, "n/a")
 
 
 def normalize_id(value) -> str:
@@ -83,7 +106,17 @@ def is_fresh_run_requested(explicit: bool = False) -> bool:
 
 
 def is_nullish_output(value: Any) -> bool:
-    """True when an LLM-derived text field is missing/null/empty."""
+    """True when an LLM-derived value is missing/null/empty.
+
+    Handles the common payload shapes we extract from model JSON:
+      * ``None`` and ``NaN`` floats → nullish
+      * strings matching ``_NULLISH_STRINGS`` (case-insensitive) → nullish
+      * empty dicts, or dicts whose every value is itself nullish → nullish
+        (this catches the "model couldn't process input, returned all-null
+        scores" case, which would otherwise pass validation)
+      * empty lists, or lists whose every entry is nullish → nullish
+    Anything else is treated as a real value.
+    """
     if value is None:
         return True
     if isinstance(value, float):
@@ -93,6 +126,14 @@ def is_nullish_output(value: Any) -> bool:
         return False
     if isinstance(value, str):
         return value.strip().lower() in _NULLISH_STRINGS
+    if isinstance(value, dict):
+        if not value:
+            return True
+        return all(is_nullish_output(v) for v in value.values())
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return True
+        return all(is_nullish_output(v) for v in value)
     return False
 
 

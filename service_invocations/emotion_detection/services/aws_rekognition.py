@@ -107,5 +107,5 @@ def run_aws_rekognition(vea_data, results_path: Path | None = None):
     return df
 
 
-def run(vea_data):
-    return run_aws_rekognition(vea_data)
+def run(vea_data, results_path=None):
+    return run_aws_rekognition(vea_data, results_path=results_path)

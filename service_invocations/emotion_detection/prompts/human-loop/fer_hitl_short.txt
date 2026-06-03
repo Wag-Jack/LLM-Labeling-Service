@@ -3,13 +3,14 @@ You MUST return ONLY valid JSON. Do not include markdown, code fences, or explan
 JSON schema:
 {
   "llm_emotion": string,
+  "winner": string (name of the best system; must match a name below, or null if you defer),
   "scores": { "<service_name>": float in 0.0-1.0, ... one entry per system below ... },
   "confidence": float in 0.0-1.0,
   "defer_to_human": bool
 }
-Set defer_to_human to true if confidence < 0.6. Use the system names below verbatim as keys; include every system.
+Set defer_to_human to true if confidence < 0.6 (and set "winner" to null in that case). Use the system names below verbatim as keys; include every system.
 Systems (name: output):
 {service_blocks}
-If you do not receive the image, set "llm_emotion" to null, every score in "scores" to null, and defer_to_human to true.
+If you do not receive the image, set "llm_emotion" to null, "winner" to null, every score in "scores" to null, and defer_to_human to true.
 Do NOT mention that you need the image, only give the JSON schema output.
 If you violate this, the output will be discarded.

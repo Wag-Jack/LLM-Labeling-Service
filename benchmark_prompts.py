@@ -3,6 +3,7 @@ from pathlib import Path
 from service_invocations import invoke_speech_recognition as isr
 from service_invocations import invoke_language_translation as ilt
 from service_invocations import invoke_emotion_detection as ied
+from service_invocations.core import run_context as rc
 from service_invocations.core.cost_tracker import session_tracker
 from service_invocations.core.majority_voting import majority_vote, save_majority_voting
 from service_invocations.core.plotting import plot_all_for_task
@@ -74,13 +75,13 @@ def _benchmark_speech(edacc_df, service_results):
     for prompt in _list_prompts(prompts_root, "oracle"):
         print(f"=== [speech] oracle prompt: {prompt} ===")
         oracle_results = speech_oracle.generate_oracle_transcripts(
-            edacc_df, prompt_name=prompt, results_dir=isr._RESULTS_DIR,
+            edacc_df, prompt_name=prompt, results_dir=rc.task_results_dir("speech_recognition"),
         )
         if not service_results or oracle_results is None:
             continue
         print(f"=== [speech] WER for oracle prompt: {prompt} ===")
         _write_accuracy_for(
-            isr._RESULTS_DIR, "speech_recognition", prompt,
+            rc.task_results_dir("speech_recognition"), "speech_recognition", prompt,
             oracle_results, service_results, edacc_df,
             compute_wer_rows, compute_wer_summary_rows,
         )
@@ -89,13 +90,13 @@ def _benchmark_speech(edacc_df, service_results):
         for prompt in _list_prompts(prompts_root, "judge"):
             print(f"=== [speech] judge prompt: {prompt} ===")
             speech_judge.judge_transcripts(
-                service_results, edacc_df, prompt_name=prompt, results_dir=isr._RESULTS_DIR,
+                service_results, edacc_df, prompt_name=prompt, results_dir=rc.task_results_dir("speech_recognition"),
             )
 
         for prompt in _list_prompts(prompts_root, "human-loop"):
             print(f"=== [speech] human-loop prompt: {prompt} ===")
             speech_human_loop.human_loop_transcripts(
-                service_results, edacc_df, prompt_name=prompt, results_dir=isr._RESULTS_DIR,
+                service_results, edacc_df, prompt_name=prompt, results_dir=rc.task_results_dir("speech_recognition"),
             )
 
 
@@ -105,13 +106,13 @@ def _benchmark_language(europarl_df, service_results):
     for prompt in _list_prompts(prompts_root, "oracle"):
         print(f"=== [language] oracle prompt: {prompt} ===")
         oracle_results = language_oracle.generate_oracle_translations(
-            europarl_df, prompt_name=prompt, results_dir=ilt._RESULTS_DIR,
+            europarl_df, prompt_name=prompt, results_dir=rc.task_results_dir("language_translation"),
         )
         if not service_results or oracle_results is None:
             continue
         print(f"=== [language] COMET for oracle prompt: {prompt} ===")
         _write_accuracy_for(
-            ilt._RESULTS_DIR, "language_translation", prompt,
+            rc.task_results_dir("language_translation"), "language_translation", prompt,
             oracle_results, service_results, europarl_df,
             compute_comet_rows, compute_comet_summary_rows,
         )
@@ -120,13 +121,13 @@ def _benchmark_language(europarl_df, service_results):
         for prompt in _list_prompts(prompts_root, "judge"):
             print(f"=== [language] judge prompt: {prompt} ===")
             language_judge.judge_translations(
-                service_results, europarl_df, prompt_name=prompt, results_dir=ilt._RESULTS_DIR,
+                service_results, europarl_df, prompt_name=prompt, results_dir=rc.task_results_dir("language_translation"),
             )
 
         for prompt in _list_prompts(prompts_root, "human-loop"):
             print(f"=== [language] human-loop prompt: {prompt} ===")
             language_human_loop.human_loop_translations(
-                service_results, europarl_df, prompt_name=prompt, results_dir=ilt._RESULTS_DIR,
+                service_results, europarl_df, prompt_name=prompt, results_dir=rc.task_results_dir("language_translation"),
             )
 
 
@@ -136,13 +137,13 @@ def _benchmark_emotion(vea_df, service_results):
     for prompt in _list_prompts(prompts_root, "oracle"):
         print(f"=== [emotion] oracle prompt: {prompt} ===")
         oracle_results = emotion_oracle.generate_oracle_emotions(
-            vea_df, prompt_name=prompt, results_dir=ied._RESULTS_DIR,
+            vea_df, prompt_name=prompt, results_dir=rc.task_results_dir("emotion_detection"),
         )
         if not service_results or oracle_results is None:
             continue
         print(f"=== [emotion] classification metrics for oracle prompt: {prompt} ===")
         _write_accuracy_for(
-            ied._RESULTS_DIR, "emotion_detection", prompt,
+            rc.task_results_dir("emotion_detection"), "emotion_detection", prompt,
             oracle_results, service_results, vea_df,
             compute_emotion_rows, compute_emotion_summary_rows,
         )
@@ -151,24 +152,44 @@ def _benchmark_emotion(vea_df, service_results):
         for prompt in _list_prompts(prompts_root, "judge"):
             print(f"=== [emotion] judge prompt: {prompt} ===")
             emotion_judge.judge_emotions(
-                service_results, vea_df, prompt_name=prompt, results_dir=ied._RESULTS_DIR,
+                service_results, vea_df, prompt_name=prompt, results_dir=rc.task_results_dir("emotion_detection"),
             )
 
         for prompt in _list_prompts(prompts_root, "human-loop"):
             print(f"=== [emotion] human-loop prompt: {prompt} ===")
             emotion_human_loop.human_loop_emotions(
-                service_results, vea_df, prompt_name=prompt, results_dir=ied._RESULTS_DIR,
+                service_results, vea_df, prompt_name=prompt, results_dir=rc.task_results_dir("emotion_detection"),
             )
 
 
+def _load_or_restore(name: str, loader, datasets: dict | None, banner: str):
+    """Restore a continued run's samples, else draw fresh ones and persist them."""
+    if datasets is not None:
+        return datasets[name]
+    print(banner)
+    df = loader()
+    if rc.active_run_dir() is not None:
+        rc.save_samples(df, name=name)
+    return df
+
+
 def run_all_prompts(num_samples: int = DEFAULT_NUM_SAMPLES, randomize: bool = True,
-                    seed: int | None = None):
-    print("--- Gathering viable EdAcc samples ---")
-    edacc_df = load_edacc(num_samples, randomize=randomize, seed=seed)
-    print("--- Retrieving EuroParl data pairs ---")
-    europarl_df = load_en_fr(num_samples, randomize=randomize, seed=seed)
-    print("--- Retrieving Visual Emotional Analysis samples ---")
-    vea_df = load_vea(num_samples, randomize=randomize, seed=seed)
+                    seed: int | None = None, datasets: dict | None = None):
+    edacc_df = _load_or_restore(
+        "speech_recognition",
+        lambda: load_edacc(num_samples, randomize=randomize, seed=seed),
+        datasets, "--- Gathering viable EdAcc samples ---",
+    )
+    europarl_df = _load_or_restore(
+        "language_translation",
+        lambda: load_en_fr(num_samples, randomize=randomize, seed=seed),
+        datasets, "--- Retrieving EuroParl data pairs ---",
+    )
+    vea_df = _load_or_restore(
+        "emotion_detection",
+        lambda: load_vea(num_samples, randomize=randomize, seed=seed),
+        datasets, "--- Retrieving Visual Emotional Analysis samples ---",
+    )
 
     print("=== Running speech services (once) ===")
     speech_results = _run_services_only(isr, edacc_df, run_speech_recognition)
@@ -179,41 +200,40 @@ def run_all_prompts(num_samples: int = DEFAULT_NUM_SAMPLES, randomize: bool = Tr
 
     if speech_results:
         print("=== [speech] SDS ranking + Majority Voting baseline ===")
+        task_dir = rc.task_results_dir("speech_recognition")
         sds_df = compute_discrimination(speech_results, edacc_df["id"].tolist(), output_kind="text")
-        save_discrimination(sds_df, isr._SDS_DIR)
+        save_discrimination(sds_df, task_dir / "sds")
         mv_df = majority_vote(speech_results, edacc_df["id"].tolist(), output_kind="text")
-        save_majority_voting(mv_df, isr._MV_DIR)
+        save_majority_voting(mv_df, task_dir / "majority_voting")
 
     if language_results:
         print("=== [language] SDS ranking + Majority Voting baseline ===")
+        task_dir = rc.task_results_dir("language_translation")
         sds_df = compute_discrimination(language_results, europarl_df["id"].tolist(), output_kind="text")
-        save_discrimination(sds_df, ilt._SDS_DIR)
+        save_discrimination(sds_df, task_dir / "sds")
         mv_df = majority_vote(language_results, europarl_df["id"].tolist(), output_kind="text")
-        save_majority_voting(mv_df, ilt._MV_DIR)
+        save_majority_voting(mv_df, task_dir / "majority_voting")
 
     if emotion_results:
         print("=== [emotion] SDS ranking + Majority Voting baseline ===")
+        task_dir = rc.task_results_dir("emotion_detection")
         sds_df = compute_discrimination(emotion_results, vea_df["id"].tolist(), output_kind="emotion")
-        save_discrimination(sds_df, ied._SDS_DIR)
+        save_discrimination(sds_df, task_dir / "sds")
         mv_df = majority_vote(emotion_results, vea_df["id"].tolist(), output_kind="emotion")
-        save_majority_voting(mv_df, ied._MV_DIR)
+        save_majority_voting(mv_df, task_dir / "majority_voting")
 
     _benchmark_speech(edacc_df, speech_results)
     _benchmark_language(europarl_df, language_results)
     _benchmark_emotion(vea_df, emotion_results)
 
-    cost_log = session_tracker().write()
+    cost_log = session_tracker().write(results_root=rc.active_run_dir())
     if cost_log is not None:
         print(f"=== Benchmark cost log: {cost_log} (total ${session_tracker().total_usd():.4f}) ===")
 
     replot_all()
 
 
-_TASK_DIRS = (
-    (isr._RESULTS_DIR, "speech_recognition"),
-    (ilt._RESULTS_DIR, "language_translation"),
-    (ied._RESULTS_DIR, "emotion_detection"),
-)
+_TASK_NAMES = ("speech_recognition", "language_translation", "emotion_detection")
 
 
 def replot_all(only: list[str] | None = None) -> None:
@@ -221,12 +241,15 @@ def replot_all(only: list[str] | None = None) -> None:
 
     Reads only the consolidated CSVs already on disk (oracle.csv, judge.csv,
     human_loop.csv, accuracy.csv, cost.csv, sds/, majority_voting/) — no LLM
-    calls. Pass ``only`` to limit to a subset of task names.
+    calls. Task directories resolve through run_context, so this targets the
+    active timestamped run when one exists and the legacy location otherwise.
+    Pass ``only`` to limit to a subset of task names.
     """
     print("=== Plots (all tasks) ===")
-    for task_dir, task_name in _TASK_DIRS:
+    for task_name in _TASK_NAMES:
         if only is not None and task_name not in only:
             continue
+        task_dir = rc.task_results_dir(task_name)
         if not task_dir.exists():
             print(f"  - skip {task_name}: {task_dir} does not exist")
             continue
@@ -246,7 +269,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--task",
         action="append",
-        choices=[name for _, name in _TASK_DIRS],
+        choices=list(_TASK_NAMES),
         help="Limit --plots-only to one task (may be repeated). Ignored without --plots-only.",
     )
     args = parser.parse_args()

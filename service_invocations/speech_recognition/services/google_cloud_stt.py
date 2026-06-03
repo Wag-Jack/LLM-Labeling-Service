@@ -71,12 +71,10 @@ def run_gc_stt(edacc_data, results_path: Path | None = None):
         data["latency_ms"].append(round(latency_ms, 2))
         data["wav_file"].append(audio_file)
 
-    data["llm_judge_score"] = [0.0 for _ in data["id"]]
-
-    df = pd.DataFrame(data, columns=["id", "service_output", "latency_ms", "llm_judge_score", "wav_file"])
+    df = pd.DataFrame(data, columns=["id", "service_output", "latency_ms", "wav_file"])
     df.to_csv(results_path, index=False)
     return df
 
 
-def run(edacc_data):
-    return run_gc_stt(edacc_data)
+def run(edacc_data, results_path=None):
+    return run_gc_stt(edacc_data, results_path=results_path)

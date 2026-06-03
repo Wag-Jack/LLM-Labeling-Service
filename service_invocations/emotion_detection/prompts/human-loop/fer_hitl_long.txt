@@ -3,6 +3,7 @@ You MUST return ONLY valid JSON. Do not include markdown, code fences, or explan
 JSON schema:
 {
   "llm_emotion": string (your single best class from the seven listed),
+  "winner": string (name of the most accurate system; must match a name below, or null if you defer),
   "scores": {
     "<service_name>": float in 0.0-1.0 (per-service quality score, higher is better),
     ...one entry per system listed below...
@@ -16,10 +17,11 @@ Systems (name: output):
 Decision protocol:
 - Inspect the image; identify the dominant emotion and secondary cues.
 - Compare each system's output against your visual reading and assign a per-service quality score in "scores".
+- Set "winner" to the name of the highest-scoring system whose output best matches the visible face.
 - Estimate your confidence in "llm_emotion" as a float in 0.0-1.0.
 - If confidence >= 0.6, set defer_to_human to false and commit to your "llm_emotion".
-- If confidence < 0.6, set defer_to_human to true; the "llm_emotion" field should still record your best guess, but the pipeline will use the human-provided label.
+- If confidence < 0.6, set defer_to_human to true and set "winner" to null; the "llm_emotion" field should still record your best guess, but the pipeline will use the human-provided label.
 - Defer when: the face is occluded or low-quality, the systems are near-equivalent, visible cues are mixed or contradictory, or the face appears to belong to a class outside the seven defined.
-If you do not receive the image, set "llm_emotion" to null, every score in "scores" to null, and defer_to_human to true.
+If you do not receive the image, set "llm_emotion" to null, "winner" to null, every score in "scores" to null, and defer_to_human to true.
 Do NOT mention that you need the image, only give the JSON schema output.
 If you violate this, the output will be discarded.

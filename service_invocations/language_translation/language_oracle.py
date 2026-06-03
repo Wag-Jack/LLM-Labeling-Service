@@ -118,7 +118,7 @@ def generate_oracle_translations(
             def _invoke_once():
                 resp = generator(prompt, inputs={"text": english_text})
                 print(resp.content)
-                return resp, _extract_oracle(resp.content)
+                return resp, _extract_oracle(resp.content, key="translation")
 
             response, llm_oracle = _retry_until_valid(
                 _invoke_once,

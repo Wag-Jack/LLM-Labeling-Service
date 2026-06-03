@@ -46,5 +46,5 @@ def run_deepl_translation(europarl_data, results_path: Path | None = None):
     return df
 
 
-def run(europarl_data):
-    return run_deepl_translation(europarl_data)
+def run(europarl_data, results_path=None):
+    return run_deepl_translation(europarl_data, results_path=results_path)
