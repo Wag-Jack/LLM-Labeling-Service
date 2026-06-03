@@ -7,7 +7,11 @@ from service_invocations.core import run_context as rc
 from service_invocations.core.cost_tracker import session_tracker
 from service_invocations.core.majority_voting import majority_vote, save_majority_voting
 from service_invocations.core.plotting import plot_all_for_task
-from service_invocations.core.results_io import write_accuracy, write_accuracy_summary
+from service_invocations.core.results_io import (
+    accuracy_slice_complete,
+    write_accuracy,
+    write_accuracy_summary,
+)
 from service_invocations.core.sds import compute_discrimination, save_discrimination
 from service_invocations.invoke_speech_recognition import run_speech_recognition
 from service_invocations.invoke_language_translation import run_language_translation
@@ -53,23 +57,37 @@ def _run_services_only(invoke_module, df, runner):
 
 
 def _write_accuracy_for(task_dir, task_name, prompt, oracle_results, label_results, label_df, compute_rows, compute_summary):
-    """Run the per-task accuracy helpers and persist into accuracy.csv / summary."""
+    """Run the per-task accuracy helpers and persist into accuracy.csv / summary.
+
+    On a continued run, a (prompt, model) slice that is already fully present in
+    accuracy.csv is skipped — so we don't reload the COMET checkpoint or re-score
+    metrics that were computed in an earlier pass.
+    """
     if not label_results or oracle_results is None:
         return
+    services = list(label_results.keys())
+    sample_ids = label_df["id"].tolist()
+
+    def _persist(model_name, model_oracle):
+        if rc.is_continue() and accuracy_slice_complete(task_dir, prompt, model_name, services, sample_ids):
+            print(f"[resume] {task_name} metrics for {model_name}/{prompt} already complete — skipping.")
+            return
+        per_sample = compute_rows(label_results, model_oracle, label_df)
+        summary = compute_summary(per_sample, services)
+        write_accuracy(task_dir, task_name, prompt, model_name, per_sample)
+        write_accuracy_summary(task_dir, task_name, prompt, model_name, summary)
+
     if isinstance(oracle_results, dict):
         for model_name, model_oracle in oracle_results.items():
-            per_sample = compute_rows(label_results, model_oracle, label_df)
-            summary = compute_summary(per_sample, list(label_results.keys()))
-            write_accuracy(task_dir, task_name, prompt, model_name, per_sample)
-            write_accuracy_summary(task_dir, task_name, prompt, model_name, summary)
+            _persist(model_name, model_oracle)
     else:
-        per_sample = compute_rows(label_results, oracle_results, label_df)
-        summary = compute_summary(per_sample, list(label_results.keys()))
-        write_accuracy(task_dir, task_name, prompt, "default", per_sample)
-        write_accuracy_summary(task_dir, task_name, prompt, "default", summary)
+        _persist("default", oracle_results)
 
 
 def _benchmark_speech(edacc_df, service_results):
+    if not service_results:
+        print("--- Skipping speech prompts (no enabled services) ---")
+        return
     prompts_root = speech_oracle._PROMPTS_ROOT
 
     for prompt in _list_prompts(prompts_root, "oracle"):
@@ -101,6 +119,9 @@ def _benchmark_speech(edacc_df, service_results):
 
 
 def _benchmark_language(europarl_df, service_results):
+    if not service_results:
+        print("--- Skipping translation prompts (no enabled services) ---")
+        return
     prompts_root = language_oracle._PROMPTS_ROOT
 
     for prompt in _list_prompts(prompts_root, "oracle"):
@@ -132,6 +153,9 @@ def _benchmark_language(europarl_df, service_results):
 
 
 def _benchmark_emotion(vea_df, service_results):
+    if not service_results:
+        print("--- Skipping emotion prompts (no enabled services) ---")
+        return
     prompts_root = emotion_oracle._PROMPTS_ROOT
 
     for prompt in _list_prompts(prompts_root, "oracle"):
@@ -272,9 +296,27 @@ if __name__ == "__main__":
         choices=list(_TASK_NAMES),
         help="Limit --plots-only to one task (may be repeated). Ignored without --plots-only.",
     )
+    parser.add_argument(
+        "--run",
+        type=str,
+        default=None,
+        help="Target a specific run directory for --plots-only (absolute, or "
+             "relative to service_invocations/results/, e.g. "
+             "'2026-06-02/22-02-36_benchmark'). If omitted, uses the legacy "
+             "results/<task>/ location.",
+    )
     args = parser.parse_args()
 
     if args.plots_only:
-        replot_all(only=args.task)
+        only = args.task
+        if args.run is not None:
+            run_dir = Path(args.run)
+            if not run_dir.is_absolute():
+                run_dir = rc.results_root() / run_dir
+            info = rc.attach_run(run_dir)
+            print(f"=== Replotting run: {info.display} ({info.dir}) ===")
+            if not info.subdir_by_task and only is None:
+                only = [info.label] if info.label in _TASK_NAMES else None
+        replot_all(only=only)
     else:
         run_all_prompts()

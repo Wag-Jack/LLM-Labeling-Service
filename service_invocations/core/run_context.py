@@ -145,6 +145,34 @@ def start_run(
     return info
 
 
+def attach_run(run_dir: Path) -> RunInfo:
+    """Point the active run at ``run_dir`` without touching its status file.
+
+    Use this for read-only operations like replotting — unlike ``start_run``
+    with ``continue_dir``, this never marks the run ``in_progress``, so a
+    finished run stays finished.
+    """
+    global _active_run
+    run_dir = Path(run_dir)
+    if not run_dir.is_dir():
+        raise FileNotFoundError(f"Run directory not found: {run_dir}")
+    payload: dict[str, Any] = {}
+    status_path = run_dir / _STATUS_FILE
+    if status_path.exists():
+        try:
+            payload = json.loads(status_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    date, time = _parse_run_dir(run_dir)
+    label = payload.get("task") or run_dir.name.partition("_")[2] or "benchmark"
+    info = RunInfo(
+        label=label, dir=run_dir, date=date, time=time,
+        is_continue=False, subdir_by_task=bool(payload.get("subdir_by_task", False)),
+    )
+    _active_run = info
+    return info
+
+
 def mark_finished() -> None:
     if _active_run is not None:
         _write_status(_active_run, status="finished")
@@ -288,6 +316,7 @@ __all__ = [
     "task_results_dir",
     "task_services_dir",
     "start_run",
+    "attach_run",
     "mark_finished",
     "end_run",
     "save_samples",

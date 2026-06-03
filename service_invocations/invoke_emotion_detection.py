@@ -15,7 +15,11 @@ from service_invocations.core.failure_report import (
 )
 from service_invocations.core.majority_voting import majority_vote, save_majority_voting
 from service_invocations.core.plotting import plot_all_for_task
-from service_invocations.core.results_io import write_accuracy, write_accuracy_summary
+from service_invocations.core.results_io import (
+    accuracy_slice_complete,
+    write_accuracy,
+    write_accuracy_summary,
+)
 from service_invocations.core.terminal_mirror import mirrored_run
 from service_invocations.core.sds import (
     compute_discrimination,
@@ -95,6 +99,12 @@ def _load_enabled_entries(config_path: Path, task_name: str) -> list[str]:
 
 
 def _write_emotion_outputs(results_dir, label_results, oracle_results, label_df, prompt_name: str, model_name: str) -> None:
+    if rc.is_continue() and accuracy_slice_complete(
+        results_dir, prompt_name, model_name,
+        list(label_results.keys()), label_df["id"].tolist(),
+    ):
+        print(f"[resume] classification metrics for {model_name}/{prompt_name} already complete — skipping.")
+        return
     per_sample = compute_emotion_rows(label_results, oracle_results, label_df)
     summary = compute_emotion_summary_rows(per_sample, list(label_results.keys()))
     write_accuracy(results_dir, _TASK_NAME, prompt_name, model_name, per_sample)

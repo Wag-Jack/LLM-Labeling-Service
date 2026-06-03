@@ -71,6 +71,49 @@ def _read_csv_or_none(path: Path) -> pd.DataFrame | None:
     return df if not df.empty else None
 
 
+def _grouped_bar_per_prompt(
+    df: pd.DataFrame,
+    x: str,
+    y: str,
+    hue: str,
+    ylabel: str,
+    out_path: Path,
+    suptitle: str,
+    ylim: tuple[float, float] | None = None,
+) -> None:
+    """One faceted PNG: a subplot per prompt, each using the standard grouped bar.
+
+    Skipped when fewer than 2 prompts are present — the single-prompt case is
+    already covered by the aggregate chart.
+    """
+    if "prompt" not in df.columns or df.empty:
+        return
+    prompts = sorted(df["prompt"].dropna().astype(str).unique())
+    if len(prompts) < 2:
+        return
+    ncols = 1 if len(prompts) <= 2 else 2
+    nrows = (len(prompts) + ncols - 1) // ncols
+    fig, axes = plt.subplots(
+        nrows, ncols, figsize=(10 * ncols, 4.5 * nrows), squeeze=False,
+    )
+    for idx, prompt in enumerate(prompts):
+        r, c = divmod(idx, ncols)
+        ax = axes[r][c]
+        sub = df[df["prompt"].astype(str) == prompt]
+        _grouped_bar(ax, sub, x=x, y=y, hue=hue, ylabel=ylabel)
+        ax.margins(y=0.15)
+        ax.set_title(f"prompt: {prompt}")
+        if ylim is not None:
+            ax.set_ylim(*ylim)
+    for idx in range(len(prompts), nrows * ncols):
+        r, c = divmod(idx, ncols)
+        axes[r][c].axis("off")
+    fig.suptitle(suptitle)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+
+
 def _grouped_bar(ax, df: pd.DataFrame, x: str, y: str, hue: str, ylabel: str) -> None:
     pivot = df.pivot_table(index=x, columns=hue, values=y, aggfunc="mean")
     if pivot.empty:
@@ -185,6 +228,12 @@ def plot_oracle_bundle(task_dir: Path, task: str) -> None:
     fig.savefig(out_dir / "consistency_oracle_vs_human.png", dpi=150)
     plt.close(fig)
 
+    _grouped_bar_per_prompt(
+        long, x="service", y="metric", hue="reference", ylabel=cfg["ylabel"],
+        out_path=out_dir / "consistency_oracle_vs_human_by_prompt.png",
+        suptitle=f"{task} – oracle-ref vs human-ref consistency (per prompt)",
+    )
+
     _plot_cost_breakdown(task_dir, task, paradigm="oracle", out_dir=out_dir)
 
 
@@ -263,6 +312,14 @@ def _plot_winner_and_consistency(paradigm_df: pd.DataFrame, task_dir: Path, task
         fig.tight_layout()
         fig.savefig(out_dir / "winner_rate_by_service.png", dpi=150)
         plt.close(fig)
+
+        _grouped_bar_per_prompt(
+            rates, x="service", y="win_rate", hue="model",
+            ylabel="Fraction of samples picked as winner",
+            out_path=out_dir / "winner_rate_by_service_by_prompt.png",
+            suptitle=f"{task} – {paradigm_label}: LLM winner rate by service (per prompt)",
+            ylim=(0, 1.12),
+        )
 
     # Consistency: does the LLM's winner match an actually-best service per
     # the human reference?

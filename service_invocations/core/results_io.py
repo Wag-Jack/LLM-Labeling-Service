@@ -13,6 +13,8 @@ from typing import Iterable, Sequence
 
 import pandas as pd
 
+from service_invocations.core.oracle_utils import normalize_id as _normalize_id
+
 
 SERVICES_KEY = ("service", "id")
 ORACLE_KEY = ("prompt", "model", "id")
@@ -117,6 +119,39 @@ def write_accuracy_summary(task_dir: Path, task: str, prompt: str, model: str, r
     _upsert(task_dir / "accuracy_summary.csv", df, ACCURACY_SUMMARY_KEY)
 
 
+def accuracy_slice_complete(
+    task_dir: Path,
+    prompt: str,
+    model: str,
+    services: Iterable[str],
+    sample_ids: Iterable,
+) -> bool:
+    """True if accuracy.csv already holds every (service, id) for (prompt, model).
+
+    Lets a resumed run skip re-deriving metrics (COMET / WER / classification
+    accuracy) for a model whose oracle was already fully labeled. Those scores
+    are a pure function of the (stable) service outputs, references, and oracle
+    labels, so a complete slice never needs recomputation — which avoids, in
+    particular, reloading the COMET checkpoint and re-running inference.
+    """
+    path = task_dir / "accuracy.csv"
+    if not path.exists():
+        return False
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return False
+    needed = {"prompt", "model", "service", "id"}
+    if df.empty or not needed.issubset(df.columns):
+        return False
+    sl = df[(df["prompt"].astype(str) == str(prompt)) & (df["model"].astype(str) == str(model))]
+    if sl.empty:
+        return False
+    have = {(str(s), _normalize_id(i)) for s, i in zip(sl["service"].tolist(), sl["id"].tolist())}
+    expected = {(str(s), _normalize_id(i)) for s in services for i in sample_ids}
+    return bool(expected) and expected.issubset(have)
+
+
 _PARADIGM_FILES = {
     "oracle": "oracle.csv",
     "judge": "judge.csv",
@@ -155,7 +190,11 @@ def load_completed_ids(
     matched = df[(df["prompt"].astype(str) == str(prompt)) & (df["model"].astype(str) == str(model))]
     if matched.empty:
         return set()
-    return {str(v) for v in matched["id"].tolist()}
+    # Normalize ids the same way the runners do before checking membership.
+    # pandas re-reads a zero-padded id column (e.g. "0001") as the int 1, so a
+    # raw str() would yield "1" and never match the runner's "0001" key — the
+    # resume guard would then silently re-invoke every already-completed sample.
+    return {_normalize_id(v) for v in matched["id"].tolist()}
 
 
 def clear_completed_slice(

@@ -54,13 +54,28 @@ def run_with_failover(
         return proc
 
     def _run_batch(model: str, batch: List[Any]) -> List[Any]:
-        """Process ``batch`` for ``model``. Returns samples that were deferred."""
+        """Process ``batch`` for ``model``. Returns samples that were deferred.
+
+        A *fatal* ``ModelUnavailableError`` (auth/permission) gives up on the
+        model immediately — the remaining samples are dropped rather than
+        deferred, so we don't burn drain-pass cooldowns retrying credentials
+        that won't change mid-run.
+        """
         processor = _get_processor(model)
         for idx, sample in enumerate(batch):
             try:
                 row = processor(sample)
             except ModelUnavailableError as exc:
                 remaining = batch[idx:]
+                if getattr(exc, "fatal", False):
+                    print(
+                        f"[failover] Model '{model}' permanently unavailable: {exc}. "
+                        f"Skipping {len(remaining)} remaining sample(s) "
+                        f"(no retry).",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    return []
                 print(
                     f"[failover] Model '{model}' unavailable: {exc}. "
                     f"Deferring {len(remaining)} sample(s) to the queue.",

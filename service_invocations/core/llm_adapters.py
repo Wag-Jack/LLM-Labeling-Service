@@ -23,17 +23,26 @@ class UnsupportedProviderError(RuntimeError):
 
 
 class ModelUnavailableError(RuntimeError):
-    """Raised after retries are exhausted on a transient/retryable error.
+    """Raised when a model can't service a request.
 
-    Callers (e.g., the failover runner) can catch this to defer remaining
-    work for the model and proceed with the next one. Non-retryable errors
-    are not wrapped — they propagate as-is.
+    Two flavors, distinguished by ``fatal``:
+      * ``fatal=False`` (default): a transient/retryable error whose retries
+        were exhausted. The failover runner defers the remaining work and may
+        retry the model on later drain passes.
+      * ``fatal=True``: an authentication/permission/not-found error (e.g. a
+        401). Retrying is pointless — the failover runner skips the model for
+        the rest of the run instead of re-queuing it.
+
+    Either way the batch is not crashed; the runner proceeds with other models.
+    Other non-retryable errors are not wrapped — they propagate as-is.
     """
 
-    def __init__(self, model_id: str, original: BaseException):
-        super().__init__(f"Model '{model_id}' unavailable after retries: {original}")
+    def __init__(self, model_id: str, original: BaseException, fatal: bool = False):
+        kind = "permanently unavailable" if fatal else "unavailable after retries"
+        super().__init__(f"Model '{model_id}' {kind}: {original}")
         self.model_id = model_id
         self.original = original
+        self.fatal = fatal
 
 
 _RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504, 529}
@@ -115,6 +124,50 @@ def _classify_exception(exc: BaseException) -> Tuple[bool, float | None]:
     return False, None
 
 
+# Authentication / permission / not-found responses. These never recover by
+# retrying — the credentials, deployment, or model id are wrong — so they mark
+# the model unavailable for the whole run rather than crashing the batch.
+_FATAL_STATUS_CODES = {401, 403, 404}
+_FATAL_KEYWORDS = (
+    "http 401",
+    "http 403",
+    "http 404",
+    "401 unauthorized",
+    "403 forbidden",
+    "404 not found",
+    "unauthorized",
+    "forbidden",
+    "not authorized",
+    "permission denied",
+    "access denied",
+    "access_denied",
+    "invalid api key",
+    "invalid_api_key",
+    "api key not valid",
+    "authentication",
+)
+
+
+def _is_fatal_model_error(exc: BaseException) -> bool:
+    """True for auth/permission/not-found errors that make a model unusable.
+
+    Only consulted for non-retryable exceptions, so retryable 5xx/429 cases are
+    handled before we ever look here.
+    """
+    if isinstance(exc, url_error.HTTPError) and exc.code in _FATAL_STATUS_CODES:
+        return True
+    status_code = (
+        getattr(exc, "code", None)
+        or getattr(exc, "status_code", None)
+        or getattr(exc, "status", None)
+        or getattr(exc, "http_status", None)
+    )
+    if isinstance(status_code, int) and status_code in _FATAL_STATUS_CODES:
+        return True
+    message = str(exc).lower()
+    return any(keyword in message for keyword in _FATAL_KEYWORDS)
+
+
 def _retry_call(
     func: Callable[[], Any],
     *,
@@ -131,6 +184,15 @@ def _retry_call(
         except Exception as exc:
             retryable, suggested = _classify_exception(exc)
             if not retryable:
+                if _is_fatal_model_error(exc):
+                    print(
+                        f"[llm-retry] {description} hit a fatal auth/permission "
+                        f"error ({type(exc).__name__}: {exc}); marking model "
+                        f"unavailable and skipping (no retry).",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    raise ModelUnavailableError(model_id, exc, fatal=True) from exc
                 raise
             if attempt >= max_retries:
                 print(
