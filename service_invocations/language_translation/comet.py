@@ -5,6 +5,19 @@ from comet import download_model, load_from_checkpoint
 from service_invocations.core.oracle_utils import normalize_id as _normalize_id
 
 
+def _as_text(value) -> str:
+    """Coerce a source/translation/reference cell to a plain string for COMET.
+
+    ``None`` and pandas ``NaN`` (an empty CSV cell read back as a float) become
+    "". Note that ``value or ""`` does NOT work here: ``bool(float("nan"))`` is
+    True, so a NaN would slip through and be handed to the COMET model where a
+    string is expected.
+    """
+    if value is None or (isinstance(value, float) and value != value):
+        return ""
+    return str(value)
+
+
 def _build_outputs_by_service(results_by_service):
     outputs_by_service = {}
     for name, df in results_by_service.items():
@@ -19,9 +32,9 @@ def _score_pairs(model, sources, translations, references, batch_size=8):
     records = []
     for src, mt, ref in zip(sources, translations, references):
         records.append({
-            "src": src or "",
-            "mt": mt or "",
-            "ref": ref or "",
+            "src": _as_text(src),
+            "mt": _as_text(mt),
+            "ref": _as_text(ref),
         })
     output = model.predict(records, batch_size=batch_size)
     return output.scores

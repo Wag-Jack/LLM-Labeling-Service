@@ -9,7 +9,7 @@ from data_management.vea import load_vea
 from benchmark_prompts import run_all_prompts
 
 # Amount of samples from each dataset to run through services
-NUM_SAMPLES = 10
+NUM_SAMPLES = 100
 # Randomization controls. Set RANDOM_SEED to an integer for reproducible draws,
 # or leave as None for a fresh random sample on every run.
 RANDOMIZE_SAMPLES = True
@@ -145,8 +145,14 @@ def main():
             "Select: "
         )
 
-        if 1 <= int(command) < 6:
-            match int(command):
+        try:
+            choice = int(command.strip())
+        except ValueError:
+            print("Invalid. Select an option between 1-5.")
+            continue
+
+        if 1 <= choice < 6:
+            match choice:
                 case 1:
                     _run_task("asr")
                 case 2:

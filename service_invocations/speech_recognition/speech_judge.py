@@ -213,6 +213,11 @@ def judge_transcripts(
         samples=samples,
         make_processor=make_processor,
         on_progress=on_progress,
+        progress_task=_TASK_NAME,
+        progress_paradigm=_PARADIGM_NAME,
+        progress_prompt=prompt_name,
+        progress_total=len(samples),
+        progress_task_dir=task_dir,
     )
 
     return True

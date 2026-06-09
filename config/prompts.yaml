@@ -1,0 +1,58 @@
+# Prompt selection for the "Benchmark all prompts" menu option (main.py -> 4).
+#
+# The benchmark normally sweeps every *.txt prompt found under each task's
+# prompts/<paradigm>/ folder. This file lets you restrict that sweep so you can
+# benchmark a specific subset of prompts.
+#
+# Structure: <task>: <paradigm>: { <prompt_stem>: <true|false> }
+#   - prompt_stem is the file name without the .txt extension.
+#   - true  -> include this prompt in the benchmark.
+#   - false -> skip it.
+#
+# Fallback rules (so this file is optional and non-breaking):
+#   - If this file is missing, or a task/paradigm section is absent or null,
+#     ALL prompts in that folder are run (the original behavior).
+#   - If a paradigm section IS present, only prompts explicitly set to true run;
+#     anything listed false or omitted from that section is skipped.
+
+speech_recognition:
+  oracle:
+    asr_service_short: true
+    asr_service_medium: true
+    asr_service_long: true
+  judge:
+    asr_judge_short: true
+    asr_judge_medium: true
+    asr_judge_long: true
+  human-loop:
+    asr_hitl_short: true
+    asr_hitl_medium: true
+    asr_hitl_long: true
+
+language_translation:
+  oracle:
+    translation_service_short: true
+    translation_service_medium: true
+    translation_service_long: true
+  judge:
+    translation_judge_short: true
+    translation_judge_medium: true
+    translation_judge_long: true
+  human-loop:
+    translation_hitl_short: true
+    translation_hitl_medium: true
+    translation_hitl_long: true
+
+emotion_detection:
+  oracle:
+    fer_service_short: true
+    fer_service_medium: true
+    fer_service_long: true
+  judge:
+    fer_judge_short: true
+    fer_judge_medium: true
+    fer_judge_long: true
+  human-loop:
+    fer_hitl_short: true
+    fer_hitl_medium: true
+    fer_hitl_long: true

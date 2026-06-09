@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import yaml
+
 from service_invocations import invoke_speech_recognition as isr
 from service_invocations import invoke_language_translation as ilt
 from service_invocations import invoke_emotion_detection as ied
@@ -31,12 +33,51 @@ from data_management.vea import load_vea
 
 DEFAULT_NUM_SAMPLES = 5
 
+_PROMPTS_CONFIG_PATH = Path.cwd() / "config" / "prompts.yaml"
 
-def _list_prompts(prompts_root: Path, paradigm: str) -> list[str]:
+
+def _load_prompt_selection(task_name: str, paradigm: str) -> dict[str, bool] | None:
+    """Return the configured prompt allow-list for a ``task``/``paradigm``.
+
+    ``None`` means "no restriction — run every prompt in the folder" (used when
+    config/prompts.yaml is missing or the relevant section is absent/null). A
+    dict maps prompt stems to whether they should run.
+    """
+    if not _PROMPTS_CONFIG_PATH.exists():
+        return None
+    with _PROMPTS_CONFIG_PATH.open("r", encoding="utf-8") as f:
+        config = yaml.safe_load(f) or {}
+    if not isinstance(config, dict):
+        return None
+    task_cfg = config.get(task_name)
+    if not isinstance(task_cfg, dict):
+        return None
+    selection = task_cfg.get(paradigm)
+    if not isinstance(selection, dict):
+        return None
+    return {str(name): bool(enabled) for name, enabled in selection.items()}
+
+
+def _list_prompts(prompts_root: Path, paradigm: str, task_name: str) -> list[str]:
     folder = prompts_root / paradigm
     if not folder.is_dir():
         return []
-    return sorted(p.stem for p in folder.glob("*.txt"))
+    available = sorted(p.stem for p in folder.glob("*.txt"))
+
+    selection = _load_prompt_selection(task_name, paradigm)
+    if selection is None:
+        return available
+
+    chosen = [stem for stem in available if selection.get(stem, False)]
+    missing = [name for name, enabled in selection.items() if enabled and name not in available]
+    if missing:
+        print(f"[prompts] {task_name}/{paradigm}: configured prompt(s) not found, "
+              f"skipping: {', '.join(sorted(missing))}")
+    skipped = [stem for stem in available if stem not in chosen]
+    if skipped:
+        print(f"[prompts] {task_name}/{paradigm}: skipping {len(skipped)} "
+              f"prompt(s) per config: {', '.join(skipped)}")
+    return chosen
 
 
 def _run_services_only(invoke_module, df, runner):
@@ -90,7 +131,7 @@ def _benchmark_speech(edacc_df, service_results):
         return
     prompts_root = speech_oracle._PROMPTS_ROOT
 
-    for prompt in _list_prompts(prompts_root, "oracle"):
+    for prompt in _list_prompts(prompts_root, "oracle", "speech_recognition"):
         print(f"=== [speech] oracle prompt: {prompt} ===")
         oracle_results = speech_oracle.generate_oracle_transcripts(
             edacc_df, prompt_name=prompt, results_dir=rc.task_results_dir("speech_recognition"),
@@ -105,13 +146,13 @@ def _benchmark_speech(edacc_df, service_results):
         )
 
     if service_results:
-        for prompt in _list_prompts(prompts_root, "judge"):
+        for prompt in _list_prompts(prompts_root, "judge", "speech_recognition"):
             print(f"=== [speech] judge prompt: {prompt} ===")
             speech_judge.judge_transcripts(
                 service_results, edacc_df, prompt_name=prompt, results_dir=rc.task_results_dir("speech_recognition"),
             )
 
-        for prompt in _list_prompts(prompts_root, "human-loop"):
+        for prompt in _list_prompts(prompts_root, "human-loop", "speech_recognition"):
             print(f"=== [speech] human-loop prompt: {prompt} ===")
             speech_human_loop.human_loop_transcripts(
                 service_results, edacc_df, prompt_name=prompt, results_dir=rc.task_results_dir("speech_recognition"),
@@ -124,7 +165,7 @@ def _benchmark_language(europarl_df, service_results):
         return
     prompts_root = language_oracle._PROMPTS_ROOT
 
-    for prompt in _list_prompts(prompts_root, "oracle"):
+    for prompt in _list_prompts(prompts_root, "oracle", "language_translation"):
         print(f"=== [language] oracle prompt: {prompt} ===")
         oracle_results = language_oracle.generate_oracle_translations(
             europarl_df, prompt_name=prompt, results_dir=rc.task_results_dir("language_translation"),
@@ -139,13 +180,13 @@ def _benchmark_language(europarl_df, service_results):
         )
 
     if service_results:
-        for prompt in _list_prompts(prompts_root, "judge"):
+        for prompt in _list_prompts(prompts_root, "judge", "language_translation"):
             print(f"=== [language] judge prompt: {prompt} ===")
             language_judge.judge_translations(
                 service_results, europarl_df, prompt_name=prompt, results_dir=rc.task_results_dir("language_translation"),
             )
 
-        for prompt in _list_prompts(prompts_root, "human-loop"):
+        for prompt in _list_prompts(prompts_root, "human-loop", "language_translation"):
             print(f"=== [language] human-loop prompt: {prompt} ===")
             language_human_loop.human_loop_translations(
                 service_results, europarl_df, prompt_name=prompt, results_dir=rc.task_results_dir("language_translation"),
@@ -158,7 +199,7 @@ def _benchmark_emotion(vea_df, service_results):
         return
     prompts_root = emotion_oracle._PROMPTS_ROOT
 
-    for prompt in _list_prompts(prompts_root, "oracle"):
+    for prompt in _list_prompts(prompts_root, "oracle", "emotion_detection"):
         print(f"=== [emotion] oracle prompt: {prompt} ===")
         oracle_results = emotion_oracle.generate_oracle_emotions(
             vea_df, prompt_name=prompt, results_dir=rc.task_results_dir("emotion_detection"),
@@ -173,17 +214,48 @@ def _benchmark_emotion(vea_df, service_results):
         )
 
     if service_results:
-        for prompt in _list_prompts(prompts_root, "judge"):
+        for prompt in _list_prompts(prompts_root, "judge", "emotion_detection"):
             print(f"=== [emotion] judge prompt: {prompt} ===")
             emotion_judge.judge_emotions(
                 service_results, vea_df, prompt_name=prompt, results_dir=rc.task_results_dir("emotion_detection"),
             )
 
-        for prompt in _list_prompts(prompts_root, "human-loop"):
+        for prompt in _list_prompts(prompts_root, "human-loop", "emotion_detection"):
             print(f"=== [emotion] human-loop prompt: {prompt} ===")
             emotion_human_loop.human_loop_emotions(
                 service_results, vea_df, prompt_name=prompt, results_dir=rc.task_results_dir("emotion_detection"),
             )
+
+
+def _compute_plan(*tasks) -> dict:
+    """Total model-sample jobs across the benchmark, for progress percentages.
+
+    Each ``tasks`` entry is ``(task_name, prompts_root, df, has_results)``. A
+    job is one (prompt, model, sample) unit; the total is the sum, over each
+    task that will run, of ``samples × models × prompts`` (oracle + judge +
+    human-loop prompts). Best-effort: returns an empty plan if the model
+    config can't be read, so a missing total just omits the percentage.
+    """
+    try:
+        from service_invocations.models import get_enabled_models
+        models_path = Path.cwd() / "config" / "models.yaml"
+        n_models = len(get_enabled_models(models_path))
+    except Exception:
+        n_models = 0
+    if not n_models:
+        return {}
+    total = 0
+    for task_name, prompts_root, df, has_results in tasks:
+        if not has_results:
+            continue
+        n_prompts = sum(
+            len(_list_prompts(prompts_root, paradigm, task_name))
+            for paradigm in ("oracle", "judge", "human-loop")
+        )
+        total += len(df) * n_models * n_prompts
+    if not total:
+        return {}
+    return {"total_samples": total, "num_models": n_models}
 
 
 def _load_or_restore(name: str, loader, datasets: dict | None, banner: str):
@@ -246,15 +318,45 @@ def run_all_prompts(num_samples: int = DEFAULT_NUM_SAMPLES, randomize: bool = Tr
         mv_df = majority_vote(emotion_results, vea_df["id"].tolist(), output_kind="emotion")
         save_majority_voting(mv_df, task_dir / "majority_voting")
 
-    _benchmark_speech(edacc_df, speech_results)
-    _benchmark_language(europarl_df, language_results)
-    _benchmark_emotion(vea_df, emotion_results)
+    # Register the planned scope so run_status.json can report a global
+    # percentage as the per-slice progress is recorded.
+    rc.set_plan(**_compute_plan(
+        ("speech_recognition", speech_oracle._PROMPTS_ROOT, edacc_df, bool(speech_results)),
+        ("language_translation", language_oracle._PROMPTS_ROOT, europarl_df, bool(language_results)),
+        ("emotion_detection", emotion_oracle._PROMPTS_ROOT, vea_df, bool(emotion_results)),
+    ))
 
-    cost_log = session_tracker().write(results_root=rc.active_run_dir())
-    if cost_log is not None:
-        print(f"=== Benchmark cost log: {cost_log} (total ${session_tracker().total_usd():.4f}) ===")
+    _benchmark_speech(edacc_df, speech_results)
+    _flush_task_cost("speech_recognition")
+    _benchmark_language(europarl_df, language_results)
+    _flush_task_cost("language_translation")
+    _benchmark_emotion(vea_df, emotion_results)
+    _flush_task_cost("emotion_detection")
+
+    run_dir = rc.active_run_dir()
+    if run_dir is not None:
+        cost_log = session_tracker().write(results_root=run_dir)
+        if cost_log is not None:
+            print(f"=== Benchmark cost log: {cost_log} (total ${session_tracker().total_usd():.4f}) ===")
+    else:
+        # No active run — avoid polluting the legacy results root with cost.csv.
+        print(f"=== Benchmark cost (no active run, not persisted): "
+              f"total ${session_tracker().total_usd():.4f} ===")
 
     replot_all()
+
+
+def _flush_task_cost(task_name: str) -> None:
+    """Re-write ``<task_dir>/cost.csv`` so it reflects every tracked entry for the task.
+
+    Called after each ``_benchmark_*`` block so the per-task CSV captures the
+    prompt-side LLM calls (oracle/judge/human-loop), not just the service-side
+    costs that ``_run_services_only`` flushed earlier.
+    """
+    task_dir = rc.task_results_dir(task_name)
+    if not task_dir.exists():
+        return
+    session_tracker().write(results_root=task_dir, task_filter=task_name)
 
 
 _TASK_NAMES = ("speech_recognition", "language_translation", "emotion_detection")
@@ -319,4 +421,18 @@ if __name__ == "__main__":
                 only = [info.label] if info.label in _TASK_NAMES else None
         replot_all(only=only)
     else:
-        run_all_prompts()
+        # Start a timestamped benchmark run so every artifact (including
+        # cost.csv) lands under results/<date>/<time>_benchmark/ instead of
+        # leaking into the legacy results/ root.
+        started_here = False
+        if rc.active_run_dir() is None:
+            info = rc.start_run("benchmark", subdir_by_task=True)
+            started_here = True
+            print(f"=== Starting benchmark run: {info.display} ({info.dir}) ===")
+        try:
+            run_all_prompts()
+            if started_here:
+                rc.mark_finished()
+        finally:
+            if started_here:
+                rc.end_run()

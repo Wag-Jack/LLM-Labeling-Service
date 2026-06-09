@@ -15,6 +15,12 @@ Callers supply:
 - ``on_progress(model, rows, is_final)``: optional callback fired each time
   a model's batch finishes a pass — either run-to-completion, deferred, or
   given up after the final drain pass. Use this to persist partial CSVs.
+
+  It is also fired mid-batch every ``checkpoint_every`` newly processed
+  samples, so a hard crash (OOM, SIGKILL, unexpected exception) loses at most
+  that many samples' work instead of the entire in-progress model pass. The
+  callback must therefore be idempotent — it always receives every row
+  accumulated so far, and the runners persist via keyed upserts.
 """
 
 from __future__ import annotations
@@ -28,6 +34,10 @@ from service_invocations.core.llm_adapters import ModelUnavailableError
 
 _DEFAULT_COOLDOWN = float(os.getenv("LLM_FAILOVER_COOLDOWN", "30.0"))
 _DEFAULT_DRAIN_PASSES = int(os.getenv("LLM_FAILOVER_DRAIN_PASSES", "3"))
+# How often to checkpoint partial progress within a model's pass. ``0`` disables
+# mid-batch checkpoints (persist only at pass/defer boundaries, the old
+# behavior); ``1`` flushes after every sample.
+_DEFAULT_CHECKPOINT_EVERY = int(os.getenv("LLM_FAILOVER_CHECKPOINT_EVERY", "10"))
 
 
 ProcessorFactory = Callable[[str], Callable[[Any], Optional[Dict[str, Any]]]]
@@ -42,6 +52,12 @@ def run_with_failover(
     on_progress: Optional[ProgressCallback] = None,
     cooldown_seconds: float = _DEFAULT_COOLDOWN,
     max_drain_passes: int = _DEFAULT_DRAIN_PASSES,
+    checkpoint_every: int = _DEFAULT_CHECKPOINT_EVERY,
+    progress_task: Optional[str] = None,
+    progress_paradigm: Optional[str] = None,
+    progress_prompt: Optional[str] = None,
+    progress_total: Optional[int] = None,
+    progress_task_dir: Optional[Any] = None,
 ) -> Dict[str, List[Dict[str, Any]]]:
     results: Dict[str, List[Dict[str, Any]]] = {m: [] for m in models}
     processors: Dict[str, Callable[[Any], Optional[Dict[str, Any]]]] = {}
@@ -53,6 +69,43 @@ def run_with_failover(
             processors[model] = proc
         return proc
 
+    def _emit_progress(model: str, is_final: bool) -> None:
+        if on_progress is not None:
+            try:
+                on_progress(model, list(results[model]), is_final)
+            except Exception as exc:
+                print(
+                    f"[failover] on_progress callback for '{model}' raised "
+                    f"{type(exc).__name__}: {exc}. Continuing.",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        _record_progress(model)
+
+    def _record_progress(model: str) -> None:
+        """Mirror this slice's progress into run_status.json (best-effort).
+
+        Counts the unique sample ids already persisted to the consolidated CSV
+        — the source of truth — so the tally is correct across resumes (it
+        includes work done in earlier sessions, not just this process's rows).
+        on_progress has already flushed the current rows, so the CSV is current.
+        """
+        if progress_task is None or progress_task_dir is None:
+            return
+        try:
+            from service_invocations.core import run_context as _rc
+            from service_invocations.core.results_io import load_completed_ids
+
+            done = len(load_completed_ids(
+                progress_task_dir, progress_paradigm, progress_prompt, model
+            ))
+            total = progress_total if progress_total is not None else done
+            _rc.record_progress(
+                progress_task, progress_paradigm, progress_prompt, model, done, total,
+            )
+        except Exception:
+            pass
+
     def _run_batch(model: str, batch: List[Any]) -> List[Any]:
         """Process ``batch`` for ``model``. Returns samples that were deferred.
 
@@ -60,8 +113,15 @@ def run_with_failover(
         model immediately — the remaining samples are dropped rather than
         deferred, so we don't burn drain-pass cooldowns retrying credentials
         that won't change mid-run.
+
+        Partial progress is checkpointed every ``checkpoint_every`` newly
+        processed samples (when > 0) by firing ``on_progress`` mid-batch, so a
+        hard crash loses at most that many samples' work rather than the whole
+        pass. The boundary emits done by the caller still run; the extra writes
+        are idempotent upserts, so they never duplicate rows.
         """
         processor = _get_processor(model)
+        since_checkpoint = 0
         for idx, sample in enumerate(batch):
             try:
                 row = processor(sample)
@@ -85,20 +145,11 @@ def run_with_failover(
                 return remaining
             if row is not None:
                 results[model].append(row)
+                since_checkpoint += 1
+                if checkpoint_every > 0 and since_checkpoint >= checkpoint_every:
+                    _emit_progress(model, is_final=False)
+                    since_checkpoint = 0
         return []
-
-    def _emit_progress(model: str, is_final: bool) -> None:
-        if on_progress is None:
-            return
-        try:
-            on_progress(model, list(results[model]), is_final)
-        except Exception as exc:
-            print(
-                f"[failover] on_progress callback for '{model}' raised "
-                f"{type(exc).__name__}: {exc}. Continuing.",
-                file=sys.stderr,
-                flush=True,
-            )
 
     pending: Dict[str, List[Any]] = {}
 

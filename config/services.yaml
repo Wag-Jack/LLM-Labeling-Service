@@ -32,6 +32,6 @@ emotion_detection:
   microsoft_azure_face:
     enabled: false
   aws_rekognition:
-    enabled: false
+    enabled: true
   luxand_facesdk:
-    enabled: false
+    enabled: true

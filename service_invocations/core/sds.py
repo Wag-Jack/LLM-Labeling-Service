@@ -32,7 +32,10 @@ _WHITESPACE_RE = re.compile(r"\s+")
 
 
 def _normalize_text(value: Any) -> str:
-    if value is None:
+    # None or a pandas NaN (empty CSV cell) is a missing output, not the
+    # literal token "nan" — str(float("nan")) would otherwise leak "nan" past
+    # the `if t`/`if l` empties filter in the scorers below and skew scores.
+    if value is None or (isinstance(value, float) and value != value):
         return ""
     text = str(value).strip().lower()
     return _WHITESPACE_RE.sub(" ", text)

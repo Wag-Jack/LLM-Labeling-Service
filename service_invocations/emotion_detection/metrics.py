@@ -51,7 +51,10 @@ def _extract_top_emotion(value) -> str:
 
 
 def _normalize_label(value) -> str:
-    if value is None:
+    # None or a pandas NaN (empty CSV cell) is a missing label, not the literal
+    # "nan" — otherwise a missing oracle reference slips past the `if not ref`
+    # guard in _per_class_counts and inflates a spurious false positive.
+    if value is None or (isinstance(value, float) and value != value):
         return ""
     text = str(value).strip().lower()
     return text

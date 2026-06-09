@@ -139,6 +139,158 @@ def _grouped_bar(ax, df: pd.DataFrame, x: str, y: str, hue: str, ylabel: str) ->
     ax.legend(loc="best", fontsize="small")
 
 
+def _grouped_boxplot(ax, df: pd.DataFrame, x: str, hue: str, y: str,
+                     ylabel: str, ylim: tuple[float, float] | None = None) -> None:
+    """Grouped box plot: one x-axis tick per ``x`` value, one colored box per ``hue``.
+
+    Used to show e.g. the score distribution each model assigns to each service —
+    so you can spot "model A is harsher than model B on this service" at a glance.
+    """
+    df = df.dropna(subset=[y]).copy()
+    if df.empty:
+        return
+    df[y] = pd.to_numeric(df[y], errors="coerce")
+    df = df.dropna(subset=[y])
+    if df.empty:
+        return
+    x_labels = sorted(df[x].dropna().astype(str).unique())
+    hue_labels = sorted(df[hue].dropna().astype(str).unique())
+    if not x_labels or not hue_labels:
+        return
+    box_width = 0.8 / len(hue_labels)
+    x_pos = np.arange(len(x_labels))
+    cmap = plt.get_cmap("tab10")
+    handles = []
+    for j, hue_val in enumerate(hue_labels):
+        positions: list[float] = []
+        data: list[list[float]] = []
+        for i, x_val in enumerate(x_labels):
+            mask = (df[x].astype(str) == x_val) & (df[hue].astype(str) == hue_val)
+            vals = df.loc[mask, y].astype(float).tolist()
+            if vals:
+                positions.append(x_pos[i] + j * box_width - 0.4 + box_width / 2)
+                data.append(vals)
+        if not data:
+            continue
+        color = cmap(j % 10)
+        bp = ax.boxplot(
+            data, positions=positions, widths=box_width * 0.9,
+            patch_artist=True, showfliers=True, manage_ticks=False,
+        )
+        for patch in bp["boxes"]:
+            patch.set_facecolor(color)
+            patch.set_alpha(0.65)
+            patch.set_edgecolor("black")
+        for median in bp["medians"]:
+            median.set_color("black")
+        handles.append(plt.Rectangle((0, 0), 1, 1, color=color, alpha=0.65, label=str(hue_val)))
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(x_labels, rotation=30, ha="right")
+    ax.set_ylabel(ylabel)
+    if ylim is not None:
+        ax.set_ylim(*ylim)
+    if handles:
+        ax.legend(handles=handles, loc="best", fontsize="small")
+
+
+def _score_distribution_summary(
+    df: pd.DataFrame, group_cols: list[str], value_col: str,
+) -> pd.DataFrame:
+    """Mean / std / quartile summary for ``value_col`` grouped by ``group_cols``."""
+    rows: list[dict] = []
+    if df.empty:
+        return pd.DataFrame()
+    for keys, grp in df.groupby(group_cols, dropna=False):
+        if not isinstance(keys, tuple):
+            keys = (keys,)
+        vals = pd.to_numeric(grp[value_col], errors="coerce").dropna()
+        if vals.empty:
+            continue
+        row = dict(zip(group_cols, keys))
+        row["count"] = int(vals.size)
+        row["mean"] = round(float(vals.mean()), 6)
+        row["std"] = round(float(vals.std(ddof=1)), 6) if vals.size > 1 else 0.0
+        row["min"] = round(float(vals.min()), 6)
+        row["p25"] = round(float(vals.quantile(0.25)), 6)
+        row["median"] = round(float(vals.median()), 6)
+        row["p75"] = round(float(vals.quantile(0.75)), 6)
+        row["max"] = round(float(vals.max()), 6)
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _plot_score_distributions(
+    paradigm_df: pd.DataFrame, task: str, out_dir: Path, paradigm_label: str,
+) -> None:
+    """Emit the score-distribution box plots + summary CSV for one paradigm.
+
+    Three outputs (when the data supports them):
+      - score_distribution_by_service.png   — aggregate over prompts, x=service, hue=model
+      - score_distribution_by_service_by_prompt.png — same layout, faceted per prompt
+      - score_distribution_summary.csv      — per (prompt, model, service) and per (model, service)
+                                              with count/mean/std/quartiles
+    """
+    required = {"score", "service", "model"}
+    if not required.issubset(paradigm_df.columns):
+        return
+    df = paradigm_df.copy()
+    df["score"] = pd.to_numeric(df["score"], errors="coerce")
+    df = df.dropna(subset=["score", "service", "model"])
+    # judge / human-loop emit score=-1 as a "model failed to rate this service"
+    # sentinel. Drop those so they don't drag the mean/std/min toward -1.
+    df = df[df["score"] >= 0]
+    if df.empty:
+        return
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+    _grouped_boxplot(ax, df, x="service", hue="model", y="score",
+                     ylabel="LLM-assigned score", ylim=(-0.05, 1.05))
+    ax.set_title(f"{task} – {paradigm_label}: score distribution per service (by model)")
+    fig.tight_layout()
+    fig.savefig(out_dir / "score_distribution_by_service.png", dpi=150)
+    plt.close(fig)
+
+    if "prompt" in df.columns:
+        prompts = sorted(df["prompt"].dropna().astype(str).unique())
+        if len(prompts) >= 2:
+            ncols = 1 if len(prompts) <= 2 else 2
+            nrows = (len(prompts) + ncols - 1) // ncols
+            fig, axes = plt.subplots(
+                nrows, ncols, figsize=(12 * ncols, 4.5 * nrows), squeeze=False,
+            )
+            for idx, prompt in enumerate(prompts):
+                r, c = divmod(idx, ncols)
+                ax = axes[r][c]
+                sub = df[df["prompt"].astype(str) == prompt]
+                _grouped_boxplot(ax, sub, x="service", hue="model", y="score",
+                                 ylabel="LLM-assigned score", ylim=(-0.05, 1.05))
+                ax.set_title(f"prompt: {prompt}")
+            for idx in range(len(prompts), nrows * ncols):
+                r, c = divmod(idx, ncols)
+                axes[r][c].axis("off")
+            fig.suptitle(
+                f"{task} – {paradigm_label}: score distribution per service (by model, per prompt)"
+            )
+            fig.tight_layout()
+            fig.savefig(out_dir / "score_distribution_by_service_by_prompt.png", dpi=150)
+            plt.close(fig)
+
+    summary_parts: list[pd.DataFrame] = []
+    if "prompt" in df.columns:
+        per_prompt = _score_distribution_summary(df, ["prompt", "model", "service"], "score")
+        if not per_prompt.empty:
+            per_prompt.insert(0, "scope", "per_prompt")
+            summary_parts.append(per_prompt)
+    aggregate = _score_distribution_summary(df, ["model", "service"], "score")
+    if not aggregate.empty:
+        aggregate.insert(0, "scope", "all_prompts")
+        aggregate.insert(1, "prompt", "<all>")
+        summary_parts.append(aggregate)
+    if summary_parts:
+        summary = pd.concat(summary_parts, ignore_index=True, sort=False)
+        summary.to_csv(out_dir / "score_distribution_summary.csv", index=False)
+
+
 def _best_services_per_sample(accuracy_df: pd.DataFrame, task: str) -> dict:
     """For each sample id, the set of services that achieve the best human metric.
 
@@ -245,6 +397,7 @@ def plot_judge_bundle(task_dir: Path, task: str) -> None:
     out_dir = _ensure_dir(task_dir / "plots" / "judge")
     _plot_winner_and_consistency(judge, task_dir, task, out_dir,
                                  paradigm_label="judge", exclude_fallback=False)
+    _plot_score_distributions(judge, task, out_dir, paradigm_label="judge")
     _plot_cost_breakdown(task_dir, task, paradigm="judge", out_dir=out_dir)
 
 
@@ -256,6 +409,7 @@ def plot_human_loop_bundle(task_dir: Path, task: str) -> None:
     out_dir = _ensure_dir(task_dir / "plots" / "human_loop")
     _plot_winner_and_consistency(hl, task_dir, task, out_dir,
                                  paradigm_label="human-loop", exclude_fallback=True)
+    _plot_score_distributions(hl, task, out_dir, paradigm_label="human-loop")
 
     if "fallback_used" in hl.columns:
         # fallback is per (sample, model, prompt) but stored per-service-row;

@@ -203,6 +203,110 @@ def _write_status(info: RunInfo, status: str) -> None:
 
 
 # --------------------------------------------------------------------------
+# Live progress (continuously written into run_status.json, so a monitor or a
+# post-crash inspection can see exactly how far the run got)
+# --------------------------------------------------------------------------
+
+
+def _update_status_payload(mutate) -> None:
+    """Read run_status.json, apply ``mutate(payload)`` in place, and write back.
+
+    Preserves whatever ``status`` the file already has (never flips a run to
+    ``finished``), and is best-effort: a read/write hiccup is swallowed so
+    progress bookkeeping can never crash the run it's reporting on.
+    """
+    if _active_run is None:
+        return
+    path = _active_run.dir / _STATUS_FILE
+    payload: dict[str, Any] = {}
+    if path.exists():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            payload = {}
+    try:
+        mutate(payload)
+    except Exception:
+        return
+    payload.setdefault("task", _active_run.label)
+    payload.setdefault("date", _active_run.date)
+    payload.setdefault("time", _active_run.time)
+    payload.setdefault("subdir_by_task", _active_run.subdir_by_task)
+    payload.setdefault("started", datetime.now().isoformat(timespec="seconds"))
+    payload.setdefault("status", "in_progress")
+    try:
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def set_plan(**fields: Any) -> None:
+    """Record the overall planned scope of the run (e.g. ``total_samples``).
+
+    Called once near the start of a benchmark so :func:`record_progress` can
+    report a global percentage. Merged into any existing ``plan`` block.
+    """
+    if _active_run is None:
+        return
+    def _mutate(payload: dict[str, Any]) -> None:
+        payload["plan"] = {**(payload.get("plan") or {}), **fields}
+    _update_status_payload(_mutate)
+
+
+def record_progress(
+    task: str,
+    paradigm: str,
+    prompt: str,
+    model: str,
+    samples_done: int,
+    samples_total: int,
+) -> None:
+    """Record progress for one (task, paradigm, prompt, model) slice.
+
+    Updates ``run_status.json`` in place: the per-slice tally, a ``current``
+    pointer to the slice last touched, and rolled-up ``totals`` (with a
+    ``percent`` when a planned ``total_samples`` is known). Fired continuously
+    (every failover checkpoint) so the file always reflects live progress and
+    survives a crash. Best-effort — never raises into the caller.
+    """
+    if _active_run is None:
+        return
+    key = f"{task}/{paradigm}/{prompt}/{model}"
+    now = datetime.now().isoformat(timespec="seconds")
+
+    def _mutate(payload: dict[str, Any]) -> None:
+        prog = payload.get("progress") or {}
+        slices = prog.get("slices") or {}
+        slices[key] = {"done": int(samples_done), "total": int(samples_total)}
+        done_sum = sum(int(s.get("done", 0)) for s in slices.values())
+        total_seen = sum(int(s.get("total", 0)) for s in slices.values())
+        complete = sum(
+            1 for s in slices.values()
+            if s.get("total") and s.get("done", 0) >= s["total"]
+        )
+        totals: dict[str, Any] = {
+            "samples_done": done_sum,
+            "samples_total_seen": total_seen,
+            "slices_started": len(slices),
+            "slices_complete": complete,
+        }
+        plan_total = (payload.get("plan") or {}).get("total_samples")
+        if plan_total:
+            totals["samples_total_planned"] = plan_total
+            totals["percent"] = round(100.0 * done_sum / plan_total, 1)
+        prog["slices"] = slices
+        prog["current"] = {
+            "task": task, "paradigm": paradigm, "prompt": prompt, "model": model,
+            "samples_done": int(samples_done), "samples_total": int(samples_total),
+        }
+        prog["totals"] = totals
+        prog["updated"] = now
+        payload["progress"] = prog
+
+    _update_status_payload(_mutate)
+
+
+# --------------------------------------------------------------------------
 # Sample persistence (so a continued run replays the exact same inputs)
 # --------------------------------------------------------------------------
 
@@ -319,6 +423,8 @@ __all__ = [
     "attach_run",
     "mark_finished",
     "end_run",
+    "set_plan",
+    "record_progress",
     "save_samples",
     "load_samples",
     "find_continuable_runs",

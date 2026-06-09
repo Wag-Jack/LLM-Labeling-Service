@@ -10,7 +10,11 @@ _WS_RE = re.compile(r"\s+")
 
 
 def _normalize_text(text):
-    if text is None:
+    # A reference/hypothesis cell may arrive as None, or as a pandas NaN
+    # (float) when an empty oracle/transcript value is round-tripped through
+    # CSV — neither has .lower(). Treat any non-string as "no words"; the
+    # caller then sees ref_words == 0 and records WER as None for that pair.
+    if not isinstance(text, str):
         return []
     text = text.lower().strip()
     text = _NON_WORD_RE.sub(" ", text)
