@@ -7,6 +7,10 @@ from service_invocations import invoke_language_translation as ilt
 from service_invocations import invoke_emotion_detection as ied
 from service_invocations.core import run_context as rc
 from service_invocations.core.cost_tracker import session_tracker
+from service_invocations.core.service_cost import (
+    format_cost_summary,
+    session_service_tracker,
+)
 from service_invocations.core.majority_voting import majority_vote, save_majority_voting
 from service_invocations.core.plotting import plot_all_for_task
 from service_invocations.core.results_io import (
@@ -337,11 +341,14 @@ def run_all_prompts(num_samples: int = DEFAULT_NUM_SAMPLES, randomize: bool = Tr
     if run_dir is not None:
         cost_log = session_tracker().write(results_root=run_dir)
         if cost_log is not None:
-            print(f"=== Benchmark cost log: {cost_log} (total ${session_tracker().total_usd():.4f}) ===")
+            print(f"=== Benchmark LLM cost log: {cost_log} ===")
+        svc_cost_log = session_service_tracker().write(results_root=run_dir)
+        if svc_cost_log is not None:
+            print(f"=== Benchmark service cost log: {svc_cost_log} ===")
     else:
-        # No active run — avoid polluting the legacy results root with cost.csv.
-        print(f"=== Benchmark cost (no active run, not persisted): "
-              f"total ${session_tracker().total_usd():.4f} ===")
+        # No active run — avoid polluting the legacy results root with cost CSVs.
+        print("=== Benchmark cost (no active run, not persisted) ===")
+    print(format_cost_summary(scope="benchmark"))
 
     replot_all()
 

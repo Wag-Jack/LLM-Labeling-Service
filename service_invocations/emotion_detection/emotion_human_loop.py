@@ -6,11 +6,15 @@ import json
 import pandas as pd
 import yaml
 
-from service_invocations.core.cost_tracker import compute_cost, session_tracker
+from service_invocations.core.cost_tracker import (
+    make_attempt_recorder as _make_attempt_recorder,
+    session_tracker,
+)
 from service_invocations.core.model_failover import run_with_failover
 from service_invocations.core.oracle_utils import (
     is_fresh_run_requested as _is_fresh_run_requested,
     is_nullish_output as _is_nullish_output,
+    judge_output_usable as _judge_output_usable,
     load_prompt as _load_prompt,
     normalize_id as _normalize_id,
     parse_json_payload as _parse_json_payload,
@@ -29,8 +33,26 @@ _PARADIGM_NAME = "human_loop"
 _TASK_NAME = "emotion_detection"
 _PROMPTS_ROOT = Path(__file__).parent / "prompts"
 _PARADIGM = "human-loop"
-_CONFIDENCE_THRESHOLD = 0.7
+# Confidence below this routes the sample to a human reviewer (the fallback in
+# process() below). Deferral uses this single criterion — the model's own
+# defer_to_human flag is intentionally not consulted (one knob, tunable, and
+# comparable across models).
+_CONFIDENCE_THRESHOLD = 0.85
 _GROUND_TRUTH_COLUMN = "label"
+
+
+def _best_service_vs_human(predictions: dict[str, str], human_label: str) -> str | None:
+    """Pick the service whose predicted emotion exactly matches the human label.
+    On fallback the human's ground-truth class resolves which system was right,
+    replacing the LLM's now-distrusted winner. Returns None when no service got
+    it right."""
+    target = human_label.strip().lower() if isinstance(human_label, str) else ""
+    if not target:
+        return None
+    for name, pred in predictions.items():
+        if isinstance(pred, str) and pred.strip().lower() == target:
+            return name
+    return None
 
 _DEFAULT_TASK_DIR = (
     Path.cwd() / "service_invocations" / "results" / "emotion_detection"
@@ -175,23 +197,22 @@ def human_loop_emotions(
                 print(resp.content)
                 return resp, _parse_json_payload(resp.content)
 
-            response, llm_output = _retry_until_valid(
-                _invoke_once,
-                validate=lambda pair: not _is_nullish_output(pair[1].get("llm_emotion")),
-                description=f"emotion_human_loop {model_name} sample={sample_id}",
-            )
-            cost = compute_cost(
-                model_name, response.input_tokens, response.output_tokens, models_path
-            )
-            tracker.record(
+            on_attempt, total_cost = _make_attempt_recorder(
+                tracker,
                 task=task_name,
                 paradigm=_PARADIGM_NAME,
                 model=model_name,
                 sample_id=sample_id,
-                input_tokens=response.input_tokens,
-                output_tokens=response.output_tokens,
-                cost_usd=cost,
+                usable=lambda pair: _judge_output_usable(pair[1], services),
+                models_path=models_path,
             )
+            response, llm_output = _retry_until_valid(
+                _invoke_once,
+                validate=lambda pair: not _is_nullish_output(pair[1].get("llm_emotion")),
+                description=f"emotion_human_loop {model_name} sample={sample_id}",
+                on_attempt=on_attempt,
+            )
+            cost = total_cost()
 
             default_scores = {name: -1 for name in services.keys()}
             scores = llm_output.get("scores", {})
@@ -206,15 +227,28 @@ def human_loop_emotions(
                 confidence_value = 0.0
 
             llm_emotion = llm_output.get("llm_emotion", "n/a")
+
+            winner = llm_output.get("winner") if isinstance(llm_output, dict) else None
+            if winner is not None and winner not in services:
+                winner = None
+
             fallback_used = confidence_value < confidence_threshold
             human_label_used = ""
             if fallback_used:
                 human_label_used = ground_truth.get(id_key, "") or ""
                 llm_emotion = human_label_used or llm_emotion
-
-            winner = llm_output.get("winner") if isinstance(llm_output, dict) else None
-            if winner is not None and winner not in services:
-                winner = None
+                # Human supplies the true class, so recompute the winner
+                # objectively (the service that matches the human label) instead
+                # of trusting the low-confidence LLM pick.
+                preds_for_id = {
+                    name: predictions_by_service[name].get(id_key, "") for name in services
+                }
+                winner = _best_service_vs_human(preds_for_id, human_label_used)
+                print(
+                    f"[fallback] {model_name} sample={sample_id}: confidence "
+                    f"{confidence_value:.2f} < {confidence_threshold:.2f} — using human label. "
+                    f"New winner: {winner if winner else 'none (no service matches the human label)'}."
+                )
 
             done_ids.add(id_key)
             return {

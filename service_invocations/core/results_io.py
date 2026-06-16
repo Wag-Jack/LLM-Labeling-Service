@@ -22,6 +22,10 @@ JUDGE_KEY = ("prompt", "model", "id", "service")
 HUMAN_LOOP_KEY = JUDGE_KEY
 ACCURACY_KEY = ("prompt", "model", "service", "id")
 ACCURACY_SUMMARY_KEY = ("prompt", "model", "service")
+# LLMaaS scores the LLM's own oracle answer as a standalone pseudo-service, so
+# "service" is constant ("llmaas") and is dropped from the upsert keys.
+LLMAAS_ACCURACY_KEY = ("prompt", "model", "id")
+LLMAAS_SUMMARY_KEY = ("prompt", "model")
 
 
 def _merge(existing: pd.DataFrame | None, new: pd.DataFrame, key: Sequence[str]) -> pd.DataFrame:
@@ -117,6 +121,31 @@ def write_accuracy_summary(task_dir: Path, task: str, prompt: str, model: str, r
     df.insert(1, "prompt", prompt)
     df.insert(2, "model", model)
     _upsert(task_dir / "accuracy_summary.csv", df, ACCURACY_SUMMARY_KEY)
+
+
+def write_llmaas_accuracy(task_dir: Path, task: str, prompt: str, model: str, rows: Iterable[dict]) -> None:
+    """Per-sample metrics for the LLM's own oracle answer (LLMaaS), scored as a
+    standalone pseudo-service against the human reference. Kept in a dedicated
+    file so it never lands in accuracy.csv (which drives best-service / winner
+    consistency logic that must only see real services)."""
+    df = pd.DataFrame(list(rows))
+    if df.empty:
+        return
+    df.insert(0, "task", task)
+    df.insert(1, "prompt", prompt)
+    df.insert(2, "model", model)
+    _upsert(task_dir / "llmaas_accuracy.csv", df, LLMAAS_ACCURACY_KEY)
+
+
+def write_llmaas_summary(task_dir: Path, task: str, prompt: str, model: str, rows: Iterable[dict]) -> None:
+    """Per-(prompt, model) summary of the LLMaaS standalone accuracy."""
+    df = pd.DataFrame(list(rows))
+    if df.empty:
+        return
+    df.insert(0, "task", task)
+    df.insert(1, "prompt", prompt)
+    df.insert(2, "model", model)
+    _upsert(task_dir / "llmaas_summary.csv", df, LLMAAS_SUMMARY_KEY)
 
 
 def accuracy_slice_complete(
@@ -266,6 +295,8 @@ __all__ = [
     "write_human_loop",
     "write_accuracy",
     "write_accuracy_summary",
+    "write_llmaas_accuracy",
+    "write_llmaas_summary",
     "load_completed_ids",
     "load_completed_rows",
     "clear_completed_slice",

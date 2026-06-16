@@ -1,17 +1,16 @@
-Please review N facial emotion recognition outputs for the same face, classified across seven classes: anger, disgust, fear, happiness, neutral, sadness, surprise. Score each system and commit to a final class, or defer to a human reviewer if uncertain. You do not have access to ground truth.
+Please review N facial emotion recognition outputs for the same face, classified across seven classes: anger, disgust, fear, happiness, neutral, sadness, surprise. Score each system and commit to your best class. You do not have access to ground truth.
 You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.
 JSON schema:
 {
   "llm_emotion": string,
-  "winner": string (name of the best system; must match a name below, or null if you defer),
+  "winner": string (name of the highest-scoring system; must match a name below),
   "scores": { "<service_name>": float in 0.0-1.0, ... one entry per system below ... },
-  "confidence": float in 0.0-1.0,
-  "defer_to_human": bool
+  "confidence": float in 0.0-1.0
 }
 Use the system names below verbatim as keys of "scores"; include every system.
 Systems (name: output):
 {service_blocks}
-Estimate confidence as a float in 0.0-1.0. Set defer_to_human to true when confidence is below 0.6 - for example when the face is ambiguous, the systems are similar, or visible cues conflict. The "llm_emotion" field should still record your best guess. Set "winner" to the highest-scoring system, or to null when you defer.
-If you do not receive the image, set "llm_emotion" to null, "winner" to null, every score in "scores" to null, and defer_to_human to true.
+Estimate your confidence in "llm_emotion" as a float in 0.0-1.0 and report it honestly: the pipeline automatically routes any sample with confidence below 0.85 to a human reviewer - so lower it when the face is ambiguous, the systems are similar, or visible cues conflict. Always record your best guess in "llm_emotion" and set "winner" to the highest-scoring system.
+If you do not receive the image, set "llm_emotion" to null, "winner" to null, and every score in "scores" to null.
 Do NOT mention that you need the image, only give the JSON schema output.
 If you violate this, the output will be discarded.

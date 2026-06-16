@@ -8,6 +8,10 @@ import yaml
 
 from service_invocations.core import run_context as rc
 from service_invocations.core.cost_tracker import session_tracker
+from service_invocations.core.service_cost import (
+    format_cost_summary,
+    session_service_tracker,
+)
 from service_invocations.core.failure_report import (
     compute_failure_report,
     print_failure_summary,
@@ -19,6 +23,13 @@ from service_invocations.core.results_io import (
     accuracy_slice_complete,
     write_accuracy,
     write_accuracy_summary,
+    write_llmaas_accuracy,
+    write_llmaas_summary,
+)
+from service_invocations.core.llmaas import (
+    LLMAAS_SERVICE,
+    oracle_as_service,
+    split_llmaas_rows,
 )
 from service_invocations.core.terminal_mirror import mirrored_run
 from service_invocations.core.sds import (
@@ -102,10 +113,16 @@ def _write_comet_outputs(results_dir, label_results, oracle_results, label_df, p
     ):
         print(f"[resume] COMET for {model_name}/{prompt_name} already complete — skipping.")
         return
-    per_sample = compute_comet_rows(label_results, oracle_results, label_df)
-    summary = compute_comet_summary_rows(per_sample, list(label_results.keys()))
-    write_accuracy(results_dir, _TASK_NAME, prompt_name, model_name, per_sample)
+    augmented = {**label_results, LLMAAS_SERVICE: oracle_as_service(oracle_results)}
+    per_sample = compute_comet_rows(augmented, oracle_results, label_df)
+    service_rows, llmaas_rows = split_llmaas_rows(per_sample)
+    summary = compute_comet_summary_rows(service_rows, list(label_results.keys()))
+    write_accuracy(results_dir, _TASK_NAME, prompt_name, model_name, service_rows)
     write_accuracy_summary(results_dir, _TASK_NAME, prompt_name, model_name, summary)
+
+    llmaas_summary = compute_comet_summary_rows(llmaas_rows, [LLMAAS_SERVICE])
+    write_llmaas_accuracy(results_dir, _TASK_NAME, prompt_name, model_name, llmaas_rows)
+    write_llmaas_summary(results_dir, _TASK_NAME, prompt_name, model_name, llmaas_summary)
 
 
 @mirrored_run(_TASK_NAME)
@@ -238,7 +255,11 @@ def run_language_translation(
 
     cost_log_path = session_tracker().write(results_root=results_dir, task_filter=_TASK_NAME)
     if cost_log_path is not None:
-        print(f"--- Cost log: {cost_log_path} (session total: ${session_tracker().total_usd():.4f}) ---")
+        print(f"--- LLM cost log: {cost_log_path} ---")
+    svc_cost_path = session_service_tracker().write(results_root=results_dir, task_filter=_TASK_NAME)
+    if svc_cost_path is not None:
+        print(f"--- Service cost log: {svc_cost_path} ---")
+    print(format_cost_summary(scope=_TASK_NAME))
 
     print("--- Plots ---")
     plot_all_for_task(results_dir, _TASK_NAME)

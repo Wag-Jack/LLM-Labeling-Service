@@ -5,11 +5,15 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
-from service_invocations.core.cost_tracker import compute_cost, session_tracker
+from service_invocations.core.cost_tracker import (
+    make_attempt_recorder as _make_attempt_recorder,
+    session_tracker,
+)
 from service_invocations.core.model_failover import run_with_failover
 from service_invocations.core.oracle_utils import (
     is_fresh_run_requested as _is_fresh_run_requested,
     is_nullish_output as _is_nullish_output,
+    judge_output_usable as _judge_output_usable,
     load_prompt as _load_prompt,
     normalize_id as _normalize_id,
     parse_json_payload as _parse_json_payload,
@@ -151,23 +155,22 @@ def judge_translations(
                 print(resp.content)
                 return resp, _parse_json_payload(resp.content)
 
-            response, llm_output = _retry_until_valid(
-                _invoke_once,
-                validate=lambda pair: not _is_nullish_output(pair[1].get("llm_translation")),
-                description=f"language_judge {model_name} sample={sample_id}",
-            )
-            cost = compute_cost(
-                model_name, response.input_tokens, response.output_tokens, models_path
-            )
-            tracker.record(
+            on_attempt, total_cost = _make_attempt_recorder(
+                tracker,
                 task=task_name,
                 paradigm=_PARADIGM_NAME,
                 model=model_name,
                 sample_id=sample_id,
-                input_tokens=response.input_tokens,
-                output_tokens=response.output_tokens,
-                cost_usd=cost,
+                usable=lambda pair: _judge_output_usable(pair[1], services),
+                models_path=models_path,
             )
+            response, llm_output = _retry_until_valid(
+                _invoke_once,
+                validate=lambda pair: not _is_nullish_output(pair[1].get("llm_translation")),
+                description=f"language_judge {model_name} sample={sample_id}",
+                on_attempt=on_attempt,
+            )
+            cost = total_cost()
 
             default_scores = {name: -1 for name in services.keys()}
             scores = llm_output.get("scores", {})

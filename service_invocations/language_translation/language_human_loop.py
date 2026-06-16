@@ -5,11 +5,15 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
-from service_invocations.core.cost_tracker import compute_cost, session_tracker
+from service_invocations.core.cost_tracker import (
+    make_attempt_recorder as _make_attempt_recorder,
+    session_tracker,
+)
 from service_invocations.core.model_failover import run_with_failover
 from service_invocations.core.oracle_utils import (
     is_fresh_run_requested as _is_fresh_run_requested,
     is_nullish_output as _is_nullish_output,
+    judge_output_usable as _judge_output_usable,
     load_prompt as _load_prompt,
     normalize_id as _normalize_id,
     parse_json_payload as _parse_json_payload,
@@ -27,12 +31,53 @@ _PARADIGM_NAME = "human_loop"
 _TASK_NAME = "language_translation"
 _PROMPTS_ROOT = Path(__file__).parent / "prompts"
 _PARADIGM = "human-loop"
-_CONFIDENCE_THRESHOLD = 0.7
+# Confidence below this routes the sample to a human reviewer (the fallback in
+# process() below). Deferral uses this single criterion — the model's own
+# defer_to_human flag is intentionally not consulted (one knob, tunable, and
+# comparable across models).
+_CONFIDENCE_THRESHOLD = 0.85
 _GROUND_TRUTH_COLUMN = "french"
 
 _DEFAULT_TASK_DIR = (
     Path.cwd() / "service_invocations" / "results" / "language_translation"
 )
+
+
+def _load_human_comet_lookup(task_dir: Path) -> dict[str, dict[str, float]]:
+    """Read the per-(id, service) human-reference COMET scores already written
+    to accuracy.csv by the COMET stage, which runs before the human-loop.
+    Returns {id: {service: human_comet}}; empty if the file or column is
+    missing. Reused on fallback so the winner matches the COMET ranking we
+    actually report — no inline re-scoring."""
+    path = task_dir / "accuracy.csv"
+    if not path.exists():
+        return {}
+    try:
+        df = pd.read_csv(path)
+    except (pd.errors.EmptyDataError, OSError):
+        return {}
+    if df.empty or not {"id", "service", "human_comet"}.issubset(df.columns):
+        return {}
+    lookup: dict[str, dict[str, float]] = {}
+    for sid, service, score in zip(df["id"], df["service"], df["human_comet"]):
+        if pd.isna(score):
+            continue
+        lookup.setdefault(_normalize_id(sid), {})[str(service)] = float(score)
+    return lookup
+
+
+def _best_service_by_comet(comet_by_service: dict[str, float], services) -> str | None:
+    """Pick the enabled service with the highest human-reference COMET score."""
+    best_name = None
+    best_score = None
+    for name in services:
+        score = comet_by_service.get(name)
+        if score is None:
+            continue
+        if best_score is None or score > best_score:
+            best_score = score
+            best_name = name
+    return best_name
 
 
 def _load_enabled_entries(config_path: Path, task_name: str) -> list[str]:
@@ -108,6 +153,8 @@ def human_loop_translations(
     ground_truth = dict(
         zip(europarl_data["id"].map(_normalize_id), europarl_data[_GROUND_TRUTH_COLUMN])
     )
+    # Per-(id, service) human COMET scores from the COMET stage (already run).
+    human_comet_lookup = _load_human_comet_lookup(task_dir)
     english_input = europarl_data["english"].tolist()
     ids = europarl_data["id"].tolist()
 
@@ -157,23 +204,22 @@ def human_loop_translations(
                 print(resp.content)
                 return resp, _parse_json_payload(resp.content)
 
-            response, llm_output = _retry_until_valid(
-                _invoke_once,
-                validate=lambda pair: not _is_nullish_output(pair[1].get("llm_translation")),
-                description=f"language_human_loop {model_name} sample={sample_id}",
-            )
-            cost = compute_cost(
-                model_name, response.input_tokens, response.output_tokens, models_path
-            )
-            tracker.record(
+            on_attempt, total_cost = _make_attempt_recorder(
+                tracker,
                 task=task_name,
                 paradigm=_PARADIGM_NAME,
                 model=model_name,
                 sample_id=sample_id,
-                input_tokens=response.input_tokens,
-                output_tokens=response.output_tokens,
-                cost_usd=cost,
+                usable=lambda pair: _judge_output_usable(pair[1], services),
+                models_path=models_path,
             )
+            response, llm_output = _retry_until_valid(
+                _invoke_once,
+                validate=lambda pair: not _is_nullish_output(pair[1].get("llm_translation")),
+                description=f"language_human_loop {model_name} sample={sample_id}",
+                on_attempt=on_attempt,
+            )
+            cost = total_cost()
 
             default_scores = {name: -1 for name in services.keys()}
             scores = llm_output.get("scores", {})
@@ -188,15 +234,32 @@ def human_loop_translations(
                 confidence_value = 0.0
 
             llm_translation = llm_output.get("llm_translation", "n/a")
+
+            winner = llm_output.get("winner") if isinstance(llm_output, dict) else None
+            if winner is not None and winner not in services:
+                winner = None
+
             fallback_used = confidence_value < confidence_threshold
             human_label_used = ""
             if fallback_used:
                 human_label_used = ground_truth.get(id_key, "") or ""
                 llm_translation = human_label_used or llm_translation
-
-            winner = llm_output.get("winner") if isinstance(llm_output, dict) else None
-            if winner is not None and winner not in services:
-                winner = None
+                # Human supplies the reference, so recompute the winner objectively
+                # as the highest human-COMET service (reusing the COMET stage's
+                # scores) instead of trusting the low-confidence LLM pick.
+                comet_by_service = human_comet_lookup.get(id_key, {})
+                winner = _best_service_by_comet(comet_by_service, services)
+                if winner:
+                    new_winner_msg = f"New winner (highest human COMET): {winner}."
+                elif not comet_by_service:
+                    new_winner_msg = "New winner: unresolved (no human COMET scores available)."
+                else:
+                    new_winner_msg = "New winner: none (no service scored)."
+                print(
+                    f"[fallback] {model_name} sample={sample_id}: confidence "
+                    f"{confidence_value:.2f} < {confidence_threshold:.2f} — using human label. "
+                    f"{new_winner_msg}"
+                )
 
             done_ids.add(id_key)
             return {

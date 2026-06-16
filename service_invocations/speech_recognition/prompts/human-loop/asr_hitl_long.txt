@@ -1,15 +1,14 @@
-Please act as part of a human-in-the-loop ASR evaluation pipeline. N independent ASR systems transcribed the same audio file from the EdAcc accented English speech corpus. You do NOT have access to ground truth. Either commit to a verdict or defer to a human reviewer when confidence is insufficient; false confidence is worse than appropriate deferral. The reviewer provides the ground-truth transcript for deferred cases.
+Please act as part of a human-in-the-loop ASR evaluation pipeline. N independent ASR systems transcribed the same audio file from the EdAcc accented English speech corpus. You do NOT have access to ground truth. Commit to your best verdict and report your confidence honestly; false confidence is worse than a low score. The pipeline routes low-confidence samples to a human reviewer, who provides the ground-truth transcript for those cases.
 You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.
 JSON schema:
 {
   "llm_transcript": string (your best transcript of what was actually spoken),
-  "winner": string (name of the system with the most accurate transcript; must match a name below, or null if you defer),
+  "winner": string (name of the system with the most accurate transcript; must match a name below),
   "scores": {
     "<service_name>": float in 0.0-1.0 (per-service transcript quality, higher is better),
     ...one entry per system listed below...
   },
-  "confidence": float in 0.0-1.0 (confidence in "llm_transcript"),
-  "defer_to_human": bool
+  "confidence": float in 0.0-1.0 (confidence in "llm_transcript")
 }
 The "scores" object MUST contain exactly one entry per system name shown below (use the names verbatim). Include every system.
 Systems (name: transcript):
@@ -18,10 +17,9 @@ Decision protocol:
 - Listen to the audio; identify spoken content including disfluencies and accented words.
 - Compare each transcript against your perception at the word level and assign per-service quality scores.
 - Set "winner" to the highest-scoring system whose transcript most faithfully matches what was spoken.
-- Estimate your confidence in "llm_transcript" as a float in 0.0-1.0.
-- If confidence >= 0.6, set defer_to_human to false and commit to "llm_transcript".
-- If confidence < 0.6, set defer_to_human to true and set "winner" to null; "llm_transcript" should still record your best guess.
-- Defer when: the audio is degraded, the accent makes verification unreliable, the transcripts differ on words you cannot confidently disambiguate, there are unverifiable non-English segments, or several transcripts are near-equivalent in fidelity.
-If you do not receive the WAV file, set "llm_transcript" to null, "winner" to null, every score in "scores" to null, and defer_to_human to true.
+- Estimate your confidence in "llm_transcript" as a float in 0.0-1.0 and report it honestly.
+- The pipeline automatically routes any sample with confidence below 0.85 to a human reviewer; you do not decide deferral yourself. Always record your best guess in "llm_transcript" and always name your best "winner".
+- Lower your confidence when: the audio is degraded, the accent makes verification unreliable, the transcripts differ on words you cannot confidently disambiguate, there are unverifiable non-English segments, or several transcripts are near-equivalent in fidelity.
+If you do not receive the WAV file, set "llm_transcript" to null, "winner" to null, and every score in "scores" to null.
 Do NOT mention that you need the WAV file, only give the JSON schema output.
 If you violate this, the output will be discarded.

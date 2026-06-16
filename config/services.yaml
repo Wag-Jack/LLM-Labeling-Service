@@ -1,37 +1,90 @@
+# Per-service pricing drives service_cost.py. Each `pricing` block names the
+# billed `unit` and one rate key:
+#   STT  -> usd_per_minute        (cost = audio_minutes * rate)
+#   MT   -> usd_per_million_chars (cost = input_chars / 1e6 * rate)
+#   FER  -> usd_per_image         (cost = 1 request per image * rate)
+# Values below are PUBLIC LIST PRICES gathered 2026-06-09 and are approximate —
+# VERIFY against your provider's current docs / negotiated tier before relying
+# on the cost numbers. A service with no `pricing` (or a null rate) records
+# cost as NaN rather than guessing.
+
 speech_recognition:
   google_cloud_stt:
     enabled: true
+    pricing:
+      unit: audio_minute
+      usd_per_minute: 0.024  # Cloud Speech-to-Text V1 standard (verify; logged-data rate is lower)
   assemblyai:
     enabled: true
+    pricing:
+      unit: audio_minute
+      usd_per_minute: 0.0062  # Universal async ~$0.37/hr (verify)
   aws_transcribe:
     enabled: true
+    pricing:
+      unit: audio_minute
+      usd_per_minute: 0.024  # Standard batch, tier 1 (verify)
   ibm_watson_stt:
     enabled: true
+    pricing:
+      unit: audio_minute
+      usd_per_minute: 0.02  # Standard plan (verify)
   speechmatics_stt:
     enabled: true
+    pricing:
+      unit: audio_minute
+      usd_per_minute: 0.0167  # Batch standard ~$1/hr (verify — varies by tier)
   deepgram_stt:
     enabled: true
+    pricing:
+      unit: audio_minute
+      usd_per_minute: 0.0043  # Nova pre-recorded (verify)
 
 language_translation:
   google_cloud_translation:
     enabled: true
+    pricing:
+      unit: character
+      usd_per_million_chars: 20.0  # Cloud Translation v3 NMT (verify; first 500k chars/mo free)
   aws_translate:
     enabled: true
+    pricing:
+      unit: character
+      usd_per_million_chars: 15.0  # Standard real-time translation (verify)
   microsoft_translator:
     enabled: true
+    pricing:
+      unit: character
+      usd_per_million_chars: 10.0  # Translator S1 pay-as-you-go (verify)
   deepl_translation:
     enabled: true
-  apptek:
-    enabled: false
+    pricing:
+      unit: character
+      usd_per_million_chars: 25.0  # API Pro ~€20/M + monthly base (verify)
   modern_mt:
     enabled: true
+    pricing:
+      unit: character
+      usd_per_million_chars: 8.0  # Usage-based ~$0.000008/char (verify)
 
 emotion_detection:
   faceplusplus:
     enabled: false
+    pricing:
+      unit: image
+      usd_per_image: 0.001  # Detect API paid tier (verify; free concurrency tier exists)
   microsoft_azure_face:
     enabled: false
+    pricing:
+      unit: image
+      usd_per_image: 0.001  # Face API S0, $1 / 1000 transactions (verify)
   aws_rekognition:
     enabled: true
+    pricing:
+      unit: image
+      usd_per_image: 0.001  # DetectFaces tier 1, $1 / 1000 images (verify)
   luxand_facesdk:
     enabled: true
+    pricing:
+      unit: image
+      usd_per_image: 0.01  # Approx; Luxand.cloud bills per monthly plan, not per call (verify)

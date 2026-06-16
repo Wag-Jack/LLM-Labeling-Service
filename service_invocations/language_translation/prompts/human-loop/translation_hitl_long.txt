@@ -1,15 +1,14 @@
-Please act as part of a human-in-the-loop machine translation evaluation pipeline. N independent MT systems translated the same English source from the EuroParl parliamentary corpus into French. You do NOT have access to a reference. Either commit to a verdict or defer to a human reviewer when confidence is insufficient; false confidence is worse than appropriate deferral. The reviewer provides the reference for deferred cases.
+Please act as part of a human-in-the-loop machine translation evaluation pipeline. N independent MT systems translated the same English source from the EuroParl parliamentary corpus into French. You do NOT have access to a reference. Commit to your best verdict and report your confidence honestly; false confidence is worse than a low score. The pipeline routes low-confidence samples to a human reviewer, who provides the reference for those cases.
 You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.
 JSON schema:
 {
   "llm_translation": string (your best French translation of the source),
-  "winner": string (name of the system with the best translation; must match a name below, or null if you defer),
+  "winner": string (name of the system with the best translation; must match a name below),
   "scores": {
     "<service_name>": float in 0.0-1.0 (per-service translation quality, higher is better),
     ...one entry per system listed below...
   },
-  "confidence": float in 0.0-1.0 (confidence in "llm_translation"),
-  "defer_to_human": bool
+  "confidence": float in 0.0-1.0 (confidence in "llm_translation")
 }
 The "scores" object MUST contain exactly one entry per system name shown below (use the names verbatim). Include every system.
 English source: {source_text}
@@ -19,10 +18,9 @@ Decision protocol:
 - Read the source carefully; identify named entities, terminology, and ambiguous constructions.
 - Compare each translation against the source for adequacy, fluency, terminology accuracy, and register match, and assign per-service quality scores.
 - Set "winner" to the highest-scoring system whose translation best matches the source.
-- Estimate your confidence in "llm_translation" as a float in 0.0-1.0.
-- If confidence >= 0.6, set defer_to_human to false and commit to "llm_translation".
-- If confidence < 0.6, set defer_to_human to true and set "winner" to null; "llm_translation" should still record your best guess.
-- Defer when: several translations are near-equivalent, specialized terminology cannot be verified, the source admits multiple valid translations, or names/institutions are rendered differently in ways you cannot adjudicate.
-If you do not receive the text, set "llm_translation" to null, "winner" to null, every score in "scores" to null, and defer_to_human to true.
+- Estimate your confidence in "llm_translation" as a float in 0.0-1.0 and report it honestly.
+- The pipeline automatically routes any sample with confidence below 0.85 to a human reviewer; you do not decide deferral yourself. Always record your best guess in "llm_translation" and always name your best "winner".
+- Lower your confidence when: several translations are near-equivalent, specialized terminology cannot be verified, the source admits multiple valid translations, or names/institutions are rendered differently in ways you cannot adjudicate.
+If you do not receive the text, set "llm_translation" to null, "winner" to null, and every score in "scores" to null.
 Do NOT mention that you need the text, only give the JSON schema output.
 If you violate this, the output will be discarded.

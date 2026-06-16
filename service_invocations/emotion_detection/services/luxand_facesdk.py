@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import pandas as pd
 import requests
 
+from service_invocations.core.service_cost import record_service_call
 from service_invocations.emotion_detection.services._shared import (
     build_service_output,
     label_to_name,
@@ -14,6 +15,9 @@ from service_invocations.emotion_detection.services._shared import (
 )
 
 load_dotenv()
+
+_TASK_NAME = "emotion_detection"
+_SERVICE_NAME = "luxand_facesdk"
 
 _RESULTS_DIR = (
     Path.cwd()
@@ -63,6 +67,7 @@ def run_luxand_facesdk(vea_data, results_path: Path | None = None):
         "label": [],
         "label_name": [],
         "latency_ms": [],
+        "cost_usd": [],
         "service_output": [],
     }
 
@@ -96,10 +101,13 @@ def run_luxand_facesdk(vea_data, results_path: Path | None = None):
         except Exception as exc:  # noqa: BLE001
             error = str(exc)
 
+        # One billed request per image, whether or not a face was returned.
+        cost = record_service_call(_TASK_NAME, _SERVICE_NAME, sample_id, count=1)
         data["id"].append(f"luxand_facesdk_{sample_id:04d}")
         data["label"].append(label)
         data["label_name"].append(label_to_name(label))
         data["latency_ms"].append(None if latency_ms is None else round(latency_ms, 2))
+        data["cost_usd"].append(cost)
         data["service_output"].append(build_service_output(normalized, error=error))
 
     df = pd.DataFrame(data)

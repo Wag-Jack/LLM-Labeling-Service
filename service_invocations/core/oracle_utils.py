@@ -137,6 +137,26 @@ def is_nullish_output(value: Any) -> bool:
     return False
 
 
+def judge_output_usable(parsed: Any, services: Any) -> bool:
+    """Whether a judge / human-loop LLM output is a usable label.
+
+    Usable means the model named a valid winner that is one of ``services``
+    *and* assigned at least one real (non-negative) score. A billed response
+    that lacks these (no winner, or all scores == -1) still counts toward
+    total cost but is recorded as a "failed" call for the successful-cost split.
+    """
+    if not isinstance(parsed, dict):
+        return False
+    winner = parsed.get("winner")
+    winner_ok = winner is not None and winner in services
+    scores = parsed.get("scores")
+    scores_ok = isinstance(scores, dict) and any(
+        isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0
+        for v in scores.values()
+    )
+    return bool(winner_ok and scores_ok)
+
+
 def retry_until_valid(
     call: Callable[[], T],
     validate: Callable[[T], bool],
@@ -144,6 +164,7 @@ def retry_until_valid(
     description: str,
     max_attempts: int = _DEFAULT_OUTPUT_RETRIES,
     base_delay: float = _DEFAULT_OUTPUT_RETRY_DELAY,
+    on_attempt: Callable[[T, bool], None] | None = None,
 ) -> T:
     """Call ``call()`` up to ``max_attempts`` times until ``validate(result)``.
 
@@ -151,6 +172,13 @@ def retry_until_valid(
     a warning. The caller decides what to do with the (best-effort) value —
     typically: record it so downstream tabulation can still see *something*,
     rather than crashing the run.
+
+    ``on_attempt(result, ok)``, if provided, is invoked after *every* attempt
+    that returns a result (with ``ok`` = whether it passed ``validate``). This
+    lets callers account for the cost of every billed call, including the
+    invalid attempts that are otherwise discarded. It is not called when
+    ``call()`` raises (e.g. a 503 that produced no response), so failed network
+    calls are never counted.
     """
     last_result: Any = None
     for attempt in range(max_attempts):
@@ -165,6 +193,16 @@ def retry_until_valid(
                 file=sys.stderr,
                 flush=True,
             )
+        if on_attempt is not None:
+            try:
+                on_attempt(last_result, ok)
+            except Exception as exc:
+                print(
+                    f"[output-retry] {description}: on_attempt callback raised "
+                    f"{type(exc).__name__}: {exc}. Continuing.",
+                    file=sys.stderr,
+                    flush=True,
+                )
         if ok:
             return last_result
         if attempt < max_attempts - 1:

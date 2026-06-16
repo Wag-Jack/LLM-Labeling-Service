@@ -2,7 +2,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from service_invocations.core.cost_tracker import compute_cost, session_tracker
+from service_invocations.core.cost_tracker import (
+    make_attempt_recorder as _make_attempt_recorder,
+    session_tracker,
+)
 from service_invocations.core.model_failover import run_with_failover
 from service_invocations.core.oracle_utils import (
     extract_oracle as _extract_oracle,
@@ -120,23 +123,23 @@ def generate_oracle_transcripts(
                 print(resp.content)
                 return resp, _extract_oracle(resp.content, key="transcript")
 
-            response, llm_oracle = _retry_until_valid(
-                _invoke_once,
-                validate=lambda pair: not _is_nullish_output(pair[1]),
-                description=f"speech_oracle {model_name} sample={sample_id}",
-            )
-            cost = compute_cost(
-                model_name, response.input_tokens, response.output_tokens, models_path
-            )
-            tracker.record(
+            on_attempt, total_cost = _make_attempt_recorder(
+                tracker,
                 task=_TASK_NAME,
                 paradigm=_PARADIGM_NAME,
                 model=model_name,
                 sample_id=sample_id,
-                input_tokens=response.input_tokens,
-                output_tokens=response.output_tokens,
-                cost_usd=cost,
+                # A usable oracle label is a non-nullish transcript.
+                usable=lambda pair: not _is_nullish_output(pair[1]),
+                models_path=models_path,
             )
+            response, llm_oracle = _retry_until_valid(
+                _invoke_once,
+                validate=lambda pair: not _is_nullish_output(pair[1]),
+                description=f"speech_oracle {model_name} sample={sample_id}",
+                on_attempt=on_attempt,
+            )
+            cost = total_cost()
             done_ids.add(id_key)
             return {
                 "id": id_key,

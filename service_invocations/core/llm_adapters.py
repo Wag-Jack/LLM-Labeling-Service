@@ -225,6 +225,10 @@ class LLMResponse:
     latency_ms: float
     input_tokens: int | None
     output_tokens: int | None
+    # Subset of ``input_tokens`` attributed to audio parts of the prompt, when
+    # the provider reports it (e.g. Gemini ``prompt_tokens_details``). Used so
+    # the cost tracker can bill audio at a different per-million rate than text.
+    audio_input_tokens: int | None = None
 
 
 def _read_bytes(value: Any) -> bytes:
@@ -418,27 +422,30 @@ class GeminiAdapter:
             content = getattr(response, "text", None) or str(response)
 
         latency_ms = (time.perf_counter() - start_time) * 1000.0
-        input_tokens, output_tokens = _extract_gemini_usage(response)
+        input_tokens, output_tokens, audio_input_tokens = _extract_gemini_usage(response)
         return LLMResponse(
             content=content,
             latency_ms=round(latency_ms, 2),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            audio_input_tokens=audio_input_tokens,
         )
 
 
-def _extract_gemini_usage(response: Any) -> tuple[int | None, int | None]:
-    """Pull prompt/output token counts off a Gemini response.
+def _extract_gemini_usage(response: Any) -> tuple[int | None, int | None, int | None]:
+    """Pull prompt/output/audio-prompt token counts off a Gemini response.
 
     Both the legacy google-generativeai SDK and the newer google-genai SDK
     expose token usage on a ``usage_metadata`` attribute (or dict). Field names
-    differ slightly across SDK versions, so try several.
+    differ slightly across SDK versions, so try several. ``prompt_tokens_details``
+    breaks prompt tokens down by modality — sum the entries whose ``modality``
+    is AUDIO so audio input can be billed at a separate rate.
     """
     usage = getattr(response, "usage_metadata", None)
     if usage is None and isinstance(response, dict):
         usage = response.get("usage_metadata") or response.get("usage")
     if usage is None:
-        return None, None
+        return None, None, None
 
     def _get(obj: Any, *keys: str) -> int | None:
         for key in keys:
@@ -454,9 +461,45 @@ def _extract_gemini_usage(response: Any) -> tuple[int | None, int | None]:
                     continue
         return None
 
+    def _modality_tokens(details: Any, target: str) -> int | None:
+        if details is None:
+            return None
+        if not isinstance(details, (list, tuple)):
+            return None
+        total = 0
+        seen = False
+        for entry in details:
+            modality = (
+                entry.get("modality") if isinstance(entry, dict)
+                else getattr(entry, "modality", None)
+            )
+            if modality is None:
+                continue
+            modality_name = getattr(modality, "name", modality)
+            if str(modality_name).upper() != target:
+                continue
+            count = (
+                entry.get("token_count") if isinstance(entry, dict)
+                else getattr(entry, "token_count", None)
+            )
+            if count is None:
+                continue
+            try:
+                total += int(count)
+                seen = True
+            except (TypeError, ValueError):
+                continue
+        return total if seen else None
+
     input_tokens = _get(usage, "prompt_token_count", "input_token_count", "input_tokens", "prompt_tokens")
     output_tokens = _get(usage, "candidates_token_count", "output_token_count", "output_tokens", "completion_tokens")
-    return input_tokens, output_tokens
+    prompt_details = None
+    if isinstance(usage, dict):
+        prompt_details = usage.get("prompt_tokens_details")
+    else:
+        prompt_details = getattr(usage, "prompt_tokens_details", None)
+    audio_input_tokens = _modality_tokens(prompt_details, "AUDIO")
+    return input_tokens, output_tokens, audio_input_tokens
 
 
 class MicrosoftPhiAdapter:
@@ -523,11 +566,15 @@ class MicrosoftPhiAdapter:
         output_tokens = None
         prompt_tokens = None
         completion_tokens = None
+        audio_input_tokens = None
         if isinstance(usage, dict):
             input_tokens = usage.get("input_tokens")
             output_tokens = usage.get("output_tokens")
             prompt_tokens = usage.get("prompt_tokens")
             completion_tokens = usage.get("completion_tokens")
+            details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details")
+            if isinstance(details, dict):
+                audio_input_tokens = details.get("audio_tokens")
         if input_tokens is None:
             input_tokens = prompt_tokens
         if output_tokens is None:
@@ -543,6 +590,7 @@ class MicrosoftPhiAdapter:
             latency_ms=round(latency_ms, 2),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            audio_input_tokens=audio_input_tokens,
         )
 
 

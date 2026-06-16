@@ -6,10 +6,14 @@ import assemblyai as aai
 from dotenv import load_dotenv
 import pandas as pd
 
+from service_invocations.core.service_cost import audio_minutes, record_service_call
+
 load_dotenv()
 
 _RESULTS_DIR = Path.cwd() / "service_invocations" / "results" / "speech_recognition" / "services"
 RESULTS_FILE = "aa_stt.csv"
+_TASK_NAME = "speech_recognition"
+_SERVICE_NAME = "assemblyai"
 
 
 def run_assemblyai(edacc_data, results_path: Path | None = None):
@@ -27,6 +31,7 @@ def run_assemblyai(edacc_data, results_path: Path | None = None):
         "id": [],
         "service_output": [],
         "latency_ms": [],
+        "cost_usd": [],
         "wav_file": [],
     }
 
@@ -41,12 +46,16 @@ def run_assemblyai(edacc_data, results_path: Path | None = None):
         text = transcript.text or ""
         print(text)
 
+        cost = record_service_call(
+            _TASK_NAME, _SERVICE_NAME, sample_id, minutes=audio_minutes(row)
+        )
         data["id"].append(f"aa_stt_{sample_id:04d}")
         data["service_output"].append(text)
         data["latency_ms"].append(round(latency_ms, 2))
+        data["cost_usd"].append(cost)
         data["wav_file"].append(audio_file)
 
-    df = pd.DataFrame(data, columns=["id", "service_output", "latency_ms", "wav_file"])
+    df = pd.DataFrame(data, columns=["id", "service_output", "latency_ms", "cost_usd", "wav_file"])
     df.to_csv(results_path, index=False)
     return df
 

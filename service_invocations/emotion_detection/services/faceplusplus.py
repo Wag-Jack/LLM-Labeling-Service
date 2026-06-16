@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import pandas as pd
 import requests
 
+from service_invocations.core.service_cost import record_service_call
 from service_invocations.emotion_detection.services._shared import (
     build_service_output,
     label_to_name,
@@ -23,6 +24,8 @@ _RESULTS_DIR = (
     / "services"
 )
 RESULTS_FILE = "faceplusplus.csv"
+_TASK_NAME = "emotion_detection"
+_SERVICE_NAME = "faceplusplus"
 
 _EMOTION_MAPPING = {
     "anger": "anger",
@@ -62,6 +65,7 @@ def run_faceplusplus(vea_data, results_path: Path | None = None):
         "label": [],
         "label_name": [],
         "latency_ms": [],
+        "cost_usd": [],
         "service_output": [],
     }
 
@@ -100,10 +104,12 @@ def run_faceplusplus(vea_data, results_path: Path | None = None):
         except Exception as exc:  # noqa: BLE001
             error = str(exc)
 
+        cost = record_service_call(_TASK_NAME, _SERVICE_NAME, sample_id, count=1)
         data["id"].append(f"faceplusplus_{sample_id:04d}")
         data["label"].append(label)
         data["label_name"].append(label_to_name(label))
         data["latency_ms"].append(None if latency_ms is None else round(latency_ms, 2))
+        data["cost_usd"].append(cost)
         data["service_output"].append(build_service_output(normalized, error=error))
 
     df = pd.DataFrame(data)

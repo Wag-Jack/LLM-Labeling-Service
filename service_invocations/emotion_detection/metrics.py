@@ -300,4 +300,15 @@ def compute_emotion_summary_rows(
     return summary_rows
 
 
-__all__ = ["compute_emotion_rows", "compute_emotion_summary_rows"]
+def oracle_top_emotion(value) -> str:
+    """Public alias: collapse an oracle emotion score distribution to its
+    canonical top-1 label (used to score the oracle answer as an LLMaaS
+    pseudo-service)."""
+    return _oracle_top_emotion(value)
+
+
+__all__ = [
+    "compute_emotion_rows",
+    "compute_emotion_summary_rows",
+    "oracle_top_emotion",
+]
