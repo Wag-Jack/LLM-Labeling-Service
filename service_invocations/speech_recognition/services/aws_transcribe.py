@@ -81,7 +81,7 @@ def run_aws_transcribe(edacc_data, results_path: Path | None = None):
         transcript_uri = _wait_for_job(job_name, transcribe)
         transcript = _retrieve_transcript(transcript_uri)
         latency_ms = (time.perf_counter() - start_time) * 1000.0
-        print(transcript)
+        print(f"  -> {transcript}", flush=True)
 
         cost = record_service_call(
             _TASK_NAME, _SERVICE_NAME, sample_id, minutes=audio_minutes(row)

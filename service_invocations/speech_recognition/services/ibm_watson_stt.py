@@ -65,7 +65,7 @@ def run_ibm_watson_stt(edacc_data, results_path: Path | None = None):
         ).get_result()
         latency_ms = (time.perf_counter() - start_time) * 1000.0
         transcript = _extract_transcript(response)
-        print(transcript)
+        print(f"  -> {transcript}", flush=True)
 
         cost = record_service_call(
             _TASK_NAME, _SERVICE_NAME, sample_id, minutes=audio_minutes(row)

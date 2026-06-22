@@ -7,6 +7,7 @@ from service_invocations import invoke_language_translation as ilt
 from service_invocations import invoke_emotion_detection as ied
 from service_invocations.core import run_context as rc
 from service_invocations.core.cost_tracker import session_tracker
+from service_invocations.core.oracle_utils import oracle_frame_usable
 from service_invocations.core.service_cost import (
     format_cost_summary,
     session_service_tracker,
@@ -33,7 +34,7 @@ from service_invocations.emotion_detection.metrics import (
 )
 from data_management.edacc import load_edacc
 from data_management.en_fr import load_en_fr
-from data_management.vea import load_vea
+from data_management.affectnet import load_affectnet
 
 DEFAULT_NUM_SAMPLES = 5
 
@@ -114,6 +115,10 @@ def _write_accuracy_for(task_dir, task_name, prompt, oracle_results, label_resul
     sample_ids = label_df["id"].tolist()
 
     def _persist(model_name, model_oracle):
+        if not oracle_frame_usable(model_oracle):
+            print(f"[skip] {task_name} metrics for {model_name}/{prompt}: "
+                  f"no usable oracle labels (model produced no rows) — skipping.")
+            return
         if rc.is_continue() and accuracy_slice_complete(task_dir, prompt, model_name, services, sample_ids):
             print(f"[resume] {task_name} metrics for {model_name}/{prompt} already complete — skipping.")
             return
@@ -197,7 +202,7 @@ def _benchmark_language(europarl_df, service_results):
             )
 
 
-def _benchmark_emotion(vea_df, service_results):
+def _benchmark_emotion(affectnet_df, service_results):
     if not service_results:
         print("--- Skipping emotion prompts (no enabled services) ---")
         return
@@ -206,14 +211,14 @@ def _benchmark_emotion(vea_df, service_results):
     for prompt in _list_prompts(prompts_root, "oracle", "emotion_detection"):
         print(f"=== [emotion] oracle prompt: {prompt} ===")
         oracle_results = emotion_oracle.generate_oracle_emotions(
-            vea_df, prompt_name=prompt, results_dir=rc.task_results_dir("emotion_detection"),
+            affectnet_df, prompt_name=prompt, results_dir=rc.task_results_dir("emotion_detection"),
         )
         if not service_results or oracle_results is None:
             continue
         print(f"=== [emotion] classification metrics for oracle prompt: {prompt} ===")
         _write_accuracy_for(
             rc.task_results_dir("emotion_detection"), "emotion_detection", prompt,
-            oracle_results, service_results, vea_df,
+            oracle_results, service_results, affectnet_df,
             compute_emotion_rows, compute_emotion_summary_rows,
         )
 
@@ -221,13 +226,13 @@ def _benchmark_emotion(vea_df, service_results):
         for prompt in _list_prompts(prompts_root, "judge", "emotion_detection"):
             print(f"=== [emotion] judge prompt: {prompt} ===")
             emotion_judge.judge_emotions(
-                service_results, vea_df, prompt_name=prompt, results_dir=rc.task_results_dir("emotion_detection"),
+                service_results, affectnet_df, prompt_name=prompt, results_dir=rc.task_results_dir("emotion_detection"),
             )
 
         for prompt in _list_prompts(prompts_root, "human-loop", "emotion_detection"):
             print(f"=== [emotion] human-loop prompt: {prompt} ===")
             emotion_human_loop.human_loop_emotions(
-                service_results, vea_df, prompt_name=prompt, results_dir=rc.task_results_dir("emotion_detection"),
+                service_results, affectnet_df, prompt_name=prompt, results_dir=rc.task_results_dir("emotion_detection"),
             )
 
 
@@ -275,36 +280,31 @@ def _load_or_restore(name: str, loader, datasets: dict | None, banner: str):
 
 def run_all_prompts(num_samples: int = DEFAULT_NUM_SAMPLES, randomize: bool = True,
                     seed: int | None = None, datasets: dict | None = None):
-    edacc_df = _load_or_restore(
-        "speech_recognition",
-        lambda: load_edacc(num_samples, randomize=randomize, seed=seed),
-        datasets, "--- Gathering viable EdAcc samples ---",
-    )
+    # Order: MT -> ASR -> FER. The FER providers currently have account-side
+    # issues (Imentiv out of credits, SkyBiometry mood not provisioned), so the
+    # fully-working tasks run first and FER runs last.
     europarl_df = _load_or_restore(
         "language_translation",
         lambda: load_en_fr(num_samples, randomize=randomize, seed=seed),
         datasets, "--- Retrieving EuroParl data pairs ---",
     )
-    vea_df = _load_or_restore(
+    edacc_df = _load_or_restore(
+        "speech_recognition",
+        lambda: load_edacc(num_samples, randomize=randomize, seed=seed),
+        datasets, "--- Gathering viable EdAcc samples ---",
+    )
+    affectnet_df = _load_or_restore(
         "emotion_detection",
-        lambda: load_vea(num_samples, randomize=randomize, seed=seed),
-        datasets, "--- Retrieving Visual Emotional Analysis samples ---",
+        lambda: load_affectnet(num_samples, randomize=randomize, seed=seed),
+        datasets, "--- Retrieving AffectNet-7 samples ---",
     )
 
-    print("=== Running speech services (once) ===")
-    speech_results = _run_services_only(isr, edacc_df, run_speech_recognition)
     print("=== Running language services (once) ===")
     language_results = _run_services_only(ilt, europarl_df, run_language_translation)
+    print("=== Running speech services (once) ===")
+    speech_results = _run_services_only(isr, edacc_df, run_speech_recognition)
     print("=== Running emotion services (once) ===")
-    emotion_results = _run_services_only(ied, vea_df, run_emotion_detection)
-
-    if speech_results:
-        print("=== [speech] SDS ranking + Majority Voting baseline ===")
-        task_dir = rc.task_results_dir("speech_recognition")
-        sds_df = compute_discrimination(speech_results, edacc_df["id"].tolist(), output_kind="text")
-        save_discrimination(sds_df, task_dir / "sds")
-        mv_df = majority_vote(speech_results, edacc_df["id"].tolist(), output_kind="text")
-        save_majority_voting(mv_df, task_dir / "majority_voting")
+    emotion_results = _run_services_only(ied, affectnet_df, run_emotion_detection)
 
     if language_results:
         print("=== [language] SDS ranking + Majority Voting baseline ===")
@@ -314,27 +314,35 @@ def run_all_prompts(num_samples: int = DEFAULT_NUM_SAMPLES, randomize: bool = Tr
         mv_df = majority_vote(language_results, europarl_df["id"].tolist(), output_kind="text")
         save_majority_voting(mv_df, task_dir / "majority_voting")
 
+    if speech_results:
+        print("=== [speech] SDS ranking + Majority Voting baseline ===")
+        task_dir = rc.task_results_dir("speech_recognition")
+        sds_df = compute_discrimination(speech_results, edacc_df["id"].tolist(), output_kind="text")
+        save_discrimination(sds_df, task_dir / "sds")
+        mv_df = majority_vote(speech_results, edacc_df["id"].tolist(), output_kind="text")
+        save_majority_voting(mv_df, task_dir / "majority_voting")
+
     if emotion_results:
         print("=== [emotion] SDS ranking + Majority Voting baseline ===")
         task_dir = rc.task_results_dir("emotion_detection")
-        sds_df = compute_discrimination(emotion_results, vea_df["id"].tolist(), output_kind="emotion")
+        sds_df = compute_discrimination(emotion_results, affectnet_df["id"].tolist(), output_kind="emotion")
         save_discrimination(sds_df, task_dir / "sds")
-        mv_df = majority_vote(emotion_results, vea_df["id"].tolist(), output_kind="emotion")
+        mv_df = majority_vote(emotion_results, affectnet_df["id"].tolist(), output_kind="emotion")
         save_majority_voting(mv_df, task_dir / "majority_voting")
 
     # Register the planned scope so run_status.json can report a global
     # percentage as the per-slice progress is recorded.
     rc.set_plan(**_compute_plan(
-        ("speech_recognition", speech_oracle._PROMPTS_ROOT, edacc_df, bool(speech_results)),
         ("language_translation", language_oracle._PROMPTS_ROOT, europarl_df, bool(language_results)),
-        ("emotion_detection", emotion_oracle._PROMPTS_ROOT, vea_df, bool(emotion_results)),
+        ("speech_recognition", speech_oracle._PROMPTS_ROOT, edacc_df, bool(speech_results)),
+        ("emotion_detection", emotion_oracle._PROMPTS_ROOT, affectnet_df, bool(emotion_results)),
     ))
 
-    _benchmark_speech(edacc_df, speech_results)
-    _flush_task_cost("speech_recognition")
     _benchmark_language(europarl_df, language_results)
     _flush_task_cost("language_translation")
-    _benchmark_emotion(vea_df, emotion_results)
+    _benchmark_speech(edacc_df, speech_results)
+    _flush_task_cost("speech_recognition")
+    _benchmark_emotion(affectnet_df, emotion_results)
     _flush_task_cost("emotion_detection")
 
     run_dir = rc.active_run_dir()
@@ -366,7 +374,7 @@ def _flush_task_cost(task_name: str) -> None:
     session_tracker().write(results_root=task_dir, task_filter=task_name)
 
 
-_TASK_NAMES = ("speech_recognition", "language_translation", "emotion_detection")
+_TASK_NAMES = ("language_translation", "speech_recognition", "emotion_detection")
 
 
 def replot_all(only: list[str] | None = None) -> None:

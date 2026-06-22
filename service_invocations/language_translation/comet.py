@@ -11,7 +11,10 @@ import torch
 
 from comet import download_model, load_from_checkpoint
 
-from service_invocations.core.oracle_utils import normalize_id as _normalize_id
+from service_invocations.core.oracle_utils import (
+    normalize_id as _normalize_id,
+    oracle_id_map as _oracle_id_map,
+)
 
 
 def _as_text(value) -> str:
@@ -99,7 +102,9 @@ def compute_comet_rows(results_by_service, oracle_results, europarl_data,
         raise ValueError("No translation results provided for COMET scoring.")
 
     outputs_by_service = _build_outputs_by_service(results_by_service)
-    oracle_by_id = dict(zip(oracle_results["id"].map(_normalize_id), oracle_results["llm_oracle"]))
+    # Tolerant lookup: a model that produced no oracle rows yields {} rather
+    # than raising KeyError, so each sample falls back to an empty reference.
+    oracle_by_id = _oracle_id_map(oracle_results)
 
     ids = europarl_data["id"].tolist()
     sources = europarl_data["english"].tolist()

@@ -63,7 +63,7 @@ def run_deepgram_stt(edacc_data, results_path: Path | None = None):
         latency_ms = (time.perf_counter() - start_time) * 1000.0
         response.raise_for_status()
         transcript = _extract_transcript(response.json())
-        print(transcript)
+        print(f"  -> {transcript}", flush=True)
 
         cost = record_service_call(
             _TASK_NAME, _SERVICE_NAME, sample_id, minutes=audio_minutes(row)

@@ -62,7 +62,7 @@ def run_gc_translation(europarl_data, results_path: Path | None = None):
         )
         latency_ms = (time.perf_counter() - start_time) * 1000.0
         french = unescape(response.translations[0].translated_text)
-        print(french)
+        print(f"  -> {french}", flush=True)
 
         cost = record_service_call(
             _TASK_NAME, _SERVICE_NAME, sample_id, characters=len(english or "")

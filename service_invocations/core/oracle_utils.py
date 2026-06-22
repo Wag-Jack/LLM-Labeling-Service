@@ -89,6 +89,45 @@ def normalize_id(value) -> str:
     return value_str
 
 
+def oracle_frame_usable(oracle_results) -> bool:
+    """True when an oracle results frame can be turned into an id->label map.
+
+    A model whose oracle pass produced no rows (e.g. it was permanently
+    unavailable and the failover runner gave up on it) ends up represented as
+    ``None``, an empty frame, or — when built from an empty row list via
+    ``pd.DataFrame([])`` — a frame with *no columns at all*. The metric layer
+    used to index such a frame with a bare ``oracle_results["id"]``, which
+    raised ``KeyError: 'id'`` and aborted the whole benchmark. Route every
+    oracle-frame consumer through this guard so a degenerate model is skipped
+    rather than crashing the run.
+    """
+    if oracle_results is None:
+        return False
+    columns = getattr(oracle_results, "columns", None)
+    if columns is None or "id" not in columns or "llm_oracle" not in columns:
+        return False
+    return not getattr(oracle_results, "empty", False)
+
+
+def oracle_id_map(oracle_results, transform=None) -> dict:
+    """Map normalized sample id -> oracle label, tolerant of an unusable frame.
+
+    Returns ``{}`` when ``oracle_results`` is missing/empty/column-less (see
+    :func:`oracle_frame_usable`), so the metric computers degrade to "no oracle
+    reference" for every sample (oracle_wer/oracle_correct fall to None/0)
+    instead of raising ``KeyError``. ``transform`` optionally maps each
+    ``llm_oracle`` cell before it lands in the map (e.g. collapse an emotion
+    score distribution to its top-1 label).
+    """
+    if not oracle_frame_usable(oracle_results):
+        return {}
+    ids = oracle_results["id"].map(normalize_id)
+    values = oracle_results["llm_oracle"]
+    if transform is not None:
+        values = values.map(transform)
+    return dict(zip(ids, values))
+
+
 _extract_oracle = extract_oracle
 _normalize_id = normalize_id
 

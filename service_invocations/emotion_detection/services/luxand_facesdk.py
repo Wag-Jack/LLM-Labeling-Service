@@ -9,8 +9,10 @@ import requests
 from service_invocations.core.service_cost import record_service_call
 from service_invocations.emotion_detection.services._shared import (
     build_service_output,
+    call_until_emotion,
     label_to_name,
     normalize_emotions,
+    pick_top_emotion,
     request_with_retry,
 )
 
@@ -28,6 +30,11 @@ _RESULTS_DIR = (
 )
 RESULTS_FILE = "luxand_facesdk.csv"
 
+# Luxand can emit a "contempt" score as part of its emotion distribution.
+# AffectNet-7 has no contempt class, so contempt is dropped on projection and
+# the remaining seven scores are renormalized back to a proper distribution
+# (renormalize=True below).
+_RETURNS_CONTEMPT = True
 _EMOTION_MAPPING = {
     "anger": "anger",
     "angry": "anger",
@@ -51,7 +58,7 @@ def _extract_emotions(payload: dict) -> dict[str, float | None]:
     return payload.get("emotions", {})
 
 
-def run_luxand_facesdk(vea_data, results_path: Path | None = None):
+def run_luxand_facesdk(affectnet_data, results_path: Path | None = None):
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     if results_path is None:
         results_path = _RESULTS_DIR / RESULTS_FILE
@@ -71,38 +78,60 @@ def run_luxand_facesdk(vea_data, results_path: Path | None = None):
         "service_output": [],
     }
 
-    for _, row in vea_data.iterrows():
+    for _, row in affectnet_data.iterrows():
         image_file = row["image"]
         sample_id = int(row["id"])
         label = row.get("label")
         print(f"Luxand FaceSDK Cloud: {image_file}")
 
-        latency_ms: float | None = None
-        error: str | None = None
-        normalized: dict[str, float | None] = {}
+        def _attempt():
+            latency_ms: float | None = None
+            error: str | None = None
+            normalized: dict[str, float | None] = {}
+            try:
+                with open(image_file, "rb") as f:
+                    image_bytes = f.read()
 
-        try:
-            with open(image_file, "rb") as f:
-                image_bytes = f.read()
+                start_time = time.perf_counter()
+                response = request_with_retry(
+                    "POST",
+                    url,
+                    headers={"token": api_token},
+                    files={"photo": image_bytes},
+                    timeout=30,
+                )
+                latency_ms = (time.perf_counter() - start_time) * 1000.0
+                response.raise_for_status()
+                payload = response.json()
+                raw_scores = _extract_emotions(payload)
+                normalized = normalize_emotions(
+                    raw_scores, mapping=_EMOTION_MAPPING, renormalize=True
+                )
+            except Exception as exc:  # noqa: BLE001
+                error = str(exc)
+            return normalized, latency_ms, error
 
-            start_time = time.perf_counter()
-            response = request_with_retry(
-                "POST",
-                url,
-                headers={"token": api_token},
-                files={"photo": image_bytes},
-                timeout=30,
+        # Re-attempt whenever no emotion comes back (error or no face detected).
+        normalized, latency_ms, error, attempts = call_until_emotion(
+            _attempt, label=f"{_SERVICE_NAME} {Path(image_file).name}"
+        )
+
+        top_name, top_score = pick_top_emotion(normalized)
+        if error:
+            print(f"  -> ERROR: {error}", flush=True)
+        elif top_name is None:
+            print(
+                f"  -> (no face detected / no emotions returned after {attempts} attempts)",
+                flush=True,
             )
-            latency_ms = (time.perf_counter() - start_time) * 1000.0
-            response.raise_for_status()
-            payload = response.json()
-            raw_scores = _extract_emotions(payload)
-            normalized = normalize_emotions(raw_scores, mapping=_EMOTION_MAPPING)
-        except Exception as exc:  # noqa: BLE001
-            error = str(exc)
+        else:
+            scores = ", ".join(
+                f"{k}={v:.2f}" for k, v in normalized.items() if v is not None
+            )
+            print(f"  -> {top_name} ({top_score:.2f})  [{scores}]", flush=True)
 
-        # One billed request per image, whether or not a face was returned.
-        cost = record_service_call(_TASK_NAME, _SERVICE_NAME, sample_id, count=1)
+        # One billed request per attempt (retries re-bill), face returned or not.
+        cost = record_service_call(_TASK_NAME, _SERVICE_NAME, sample_id, count=attempts)
         data["id"].append(f"luxand_facesdk_{sample_id:04d}")
         data["label"].append(label)
         data["label_name"].append(label_to_name(label))
@@ -115,5 +144,5 @@ def run_luxand_facesdk(vea_data, results_path: Path | None = None):
     return df
 
 
-def run(vea_data, results_path=None):
-    return run_luxand_facesdk(vea_data, results_path=results_path)
+def run(affectnet_data, results_path=None):
+    return run_luxand_facesdk(affectnet_data, results_path=results_path)

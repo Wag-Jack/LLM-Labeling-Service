@@ -44,7 +44,7 @@ def run_deepl_translation(europarl_data, results_path: Path | None = None):
         result = translator.translate_text(english, source_lang="EN", target_lang="FR")
         latency_ms = (time.perf_counter() - start_time) * 1000.0
         french = result.text if result is not None else ""
-        print(french)
+        print(f"  -> {french}", flush=True)
 
         cost = record_service_call(
             _TASK_NAME, _SERVICE_NAME, sample_id, characters=len(english or "")

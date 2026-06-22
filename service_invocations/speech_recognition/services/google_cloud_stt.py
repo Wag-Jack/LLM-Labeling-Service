@@ -69,7 +69,7 @@ def run_gc_stt(edacc_data, results_path: Path | None = None):
         response = client.recognize(config=config, audio=audio)
         latency_ms = (time.perf_counter() - start_time) * 1000.0
         transcript = _combine_response(response)
-        print(transcript)
+        print(f"  -> {transcript}", flush=True)
 
         cost = record_service_call(
             _TASK_NAME, _SERVICE_NAME, sample_id, minutes=audio_minutes(row)

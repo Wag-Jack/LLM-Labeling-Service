@@ -76,7 +76,7 @@ def _extract_top_emotion(service_output: str | None) -> str:
 
 def judge_emotions(
     results_by_service: dict[str, pd.DataFrame],
-    vea_data: pd.DataFrame,
+    affectnet_data: pd.DataFrame,
     prompt_name: str,
     results_dir: Path | None = None,
     services_path: Path | None = None,
@@ -124,8 +124,8 @@ def judge_emotions(
             zip(df["id"].map(_normalize_id), df["service_output"].map(_extract_top_emotion))
         )
 
-    image_files = vea_data["image"].tolist()
-    ids = vea_data["id"].tolist()
+    image_files = affectnet_data["image"].tolist()
+    ids = affectnet_data["id"].tolist()
 
     samples = [
         {"id": sample_id, "image": image_file}

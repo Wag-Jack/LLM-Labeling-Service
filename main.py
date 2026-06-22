@@ -5,7 +5,7 @@ from service_invocations.core.terminal_mirror import trial_log
 from service_invocations.core import run_context as rc
 from data_management.edacc import load_edacc
 from data_management.en_fr import load_en_fr
-from data_management.vea import load_vea
+from data_management.affectnet import load_affectnet
 from benchmark_prompts import run_all_prompts
 
 # Amount of samples from each dataset to run through services
@@ -28,9 +28,9 @@ _TASK_SPECS = {
     "fer": (
         "emotion_detection",
         "fer",
-        lambda: load_vea(NUM_SAMPLES, randomize=RANDOMIZE_SAMPLES, seed=RANDOM_SEED),
+        lambda: load_affectnet(NUM_SAMPLES, randomize=RANDOMIZE_SAMPLES, seed=RANDOM_SEED),
         run_emotion_detection,
-        "--- Retrieving Visual Emotional Analysis samples ---",
+        "--- Retrieving AffectNet-7 samples ---",
     ),
     "mt": (
         "language_translation",

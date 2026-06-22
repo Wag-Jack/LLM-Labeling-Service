@@ -51,7 +51,7 @@ async def _transcribe_all(edacc_data) -> list[tuple[str, float]]:
             latency_ms = (time.perf_counter() - start_time) * 1000.0
             transcript = _extract_transcript(result)
             transcripts.append((transcript, latency_ms))
-            print(transcript)
+            print(f"  -> {transcript}", flush=True)
     return transcripts
 
 

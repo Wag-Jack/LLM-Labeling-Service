@@ -34,7 +34,7 @@ python main.py
 
 Pick from the menu:
 1. **ASR** — Automatic Speech Recognition (EdAcc samples)
-2. **FER** — Facial Emotion Recognition (Visual Emotional Analysis samples)
+2. **FER** — Facial Emotion Recognition (AffectNet-7 samples)
 3. **MT**  — Machine Translation (EuroParl en→fr pairs)
 4. **Benchmark all prompts** — sweep every enabled prompt across all three tasks
 5. **Exit**

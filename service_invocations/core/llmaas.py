@@ -18,6 +18,8 @@ from typing import Callable
 
 import pandas as pd
 
+from service_invocations.core.oracle_utils import oracle_frame_usable
+
 LLMAAS_SERVICE = "llmaas"
 
 
@@ -32,7 +34,13 @@ def oracle_as_service(
     task's metric reads from a service output. ASR/MT use the raw oracle text
     as-is, but FER service outputs are parsed for a top-1 label, so its oracle
     score distribution must first be collapsed to that label.
+
+    An unusable oracle frame (missing/empty/column-less — e.g. a model that
+    produced no rows) yields an empty pseudo-service so the metric layer sees
+    no llmaas outputs rather than raising ``KeyError: 'id'``.
     """
+    if not oracle_frame_usable(oracle_results):
+        return pd.DataFrame(columns=["id", "service_output"])
     out = oracle_results.rename(columns={"llm_oracle": "service_output"})[
         ["id", "service_output"]
     ].copy()

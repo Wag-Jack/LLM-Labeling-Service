@@ -249,18 +249,32 @@ def _infer_format(path_value: Any, default: str) -> str:
     return default
 
 
-def _build_openai_messages(prompt: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
-    content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
+def _build_phi_messages(prompt: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Build a Phi-4-multimodal chat message from a prompt plus optional inputs.
 
-    text_input = inputs.get("text")
-    if text_input:
-        content.append({"type": "text", "text": text_input})
+    Unlike GPT-4o-style vision models, Phi-4-multimodal does NOT infer images or
+    audio from the OpenAI ``image_url`` / ``input_audio`` content parts on its
+    own. Its processor only attends to a non-text input if a matching numbered
+    placeholder token (``<|image_1|>``, ``<|audio_1|>`` ...) appears in the user
+    text, ahead of the instruction, e.g.::
 
+        <|user|><|image_1|>Describe the image.<|end|><|assistant|>
+
+    The Azure serving layer still reads the bytes from the content parts, but
+    without the placeholder the image/audio is silently dropped and the model
+    answers as if it never received it. So we prepend one placeholder per input,
+    in order, to the prompt text. (If the endpoint synthesized these itself the
+    bare ``image_url`` path would already work — it doesn't, which is why image
+    input wasn't registering.)
+    """
+    # Materialize the non-text parts first so we know how many placeholders of
+    # each kind to emit. Order matters: placeholders must match the parts.
+    audio_parts: List[Dict[str, Any]] = []
     audio_input = inputs.get("audio")
     if audio_input is not None:
         audio_bytes = _read_bytes(audio_input)
         audio_format = inputs.get("audio_format") or _infer_format(audio_input, "wav")
-        content.append({
+        audio_parts.append({
             "type": "input_audio",
             "input_audio": {
                 "data": base64.b64encode(audio_bytes).decode("utf-8"),
@@ -268,17 +282,35 @@ def _build_openai_messages(prompt: str, inputs: Dict[str, Any]) -> List[Dict[str
             },
         })
 
+    image_parts: List[Dict[str, Any]] = []
     image_input = inputs.get("image")
     if image_input is not None:
         image_bytes = _read_bytes(image_input)
         image_format = inputs.get("image_format") or _infer_format(image_input, "png")
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
-        content.append({
+        image_parts.append({
             "type": "image_url",
             "image_url": {
                 "url": f"data:image/{image_format};base64,{image_b64}",
             },
         })
+
+    placeholders = "".join(
+        f"<|audio_{i}|>" for i in range(1, len(audio_parts) + 1)
+    ) + "".join(
+        f"<|image_{i}|>" for i in range(1, len(image_parts) + 1)
+    )
+
+    content: List[Dict[str, Any]] = [
+        {"type": "text", "text": f"{placeholders}{prompt}"}
+    ]
+
+    text_input = inputs.get("text")
+    if text_input:
+        content.append({"type": "text", "text": text_input})
+
+    content.extend(audio_parts)
+    content.extend(image_parts)
 
     return [{"role": "user", "content": content}]
 
@@ -502,6 +534,15 @@ def _extract_gemini_usage(response: Any) -> tuple[int | None, int | None, int | 
     return input_tokens, output_tokens, audio_input_tokens
 
 
+class _PhiContentFilterError(Exception):
+    """Phi rejected the input via Microsoft's content filter (HTTP 400).
+
+    Permanent for that input — retrying same prompt+text yields the same
+    refusal — so the adapter converts it into an empty LLMResponse instead
+    of raising, letting the run continue.
+    """
+
+
 class MicrosoftPhiAdapter:
     def __init__(self) -> None:
         api_key = os.getenv("MICROSOFT_PHI_KEY")
@@ -539,6 +580,8 @@ class MicrosoftPhiAdapter:
                     raise
                 body = exc.read()
                 detail = body.decode("utf-8", errors="replace")
+                if exc.code == 400 and "content_filter" in detail:
+                    raise _PhiContentFilterError(detail) from exc
                 raise RuntimeError(
                     f"Microsoft Phi request failed: HTTP {exc.code} {exc.reason} - {detail}"
                 ) from exc
@@ -552,14 +595,30 @@ class MicrosoftPhiAdapter:
 
     def generate(self, model: str, prompt: str, inputs: Dict[str, Any],
                  modalities: List[str], temperature: float = 0.0) -> LLMResponse:
-        messages = _build_openai_messages(prompt, inputs)
+        messages = _build_phi_messages(prompt, inputs)
         start_time = time.perf_counter()
         payload: Dict[str, Any] = {
             "model": model,
             "messages": messages,
             "temperature": temperature,
         }
-        response = self._post_json(payload, model_id=model)
+        try:
+            response = self._post_json(payload, model_id=model)
+        except _PhiContentFilterError as exc:
+            latency_ms = (time.perf_counter() - start_time) * 1000.0
+            print(
+                f"[phi] content filter rejected input for {model}; "
+                f"recording empty response so the run can continue. Detail: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+            return LLMResponse(
+                content="",
+                latency_ms=round(latency_ms, 2),
+                input_tokens=0,
+                output_tokens=0,
+                audio_input_tokens=None,
+            )
         latency_ms = (time.perf_counter() - start_time) * 1000.0
         usage = response.get("usage") if isinstance(response, dict) else None
         input_tokens = None

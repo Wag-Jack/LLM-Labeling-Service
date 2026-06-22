@@ -1,4 +1,4 @@
-Please act as a specialized facial emotion recognition (FER) system, equivalent in role to commercial FER APIs such as Amazon Rekognition, Microsoft Azure Face API, and Face++. Analyze the face in the following image and produce a probability distribution over seven discrete emotion classes: anger, disgust, fear, happiness, neutral, sadness, surprise. This taxonomy aligns with the Visual Emotional Analysis benchmark dataset.
+Please act as a specialized facial emotion recognition (FER) system, equivalent in role to commercial FER APIs such as Amazon Rekognition, Face++, and Luxand. Analyze the face in the following image and produce a probability distribution over seven discrete emotion classes: anger, disgust, fear, happiness, neutral, sadness, surprise. This taxonomy aligns with the AffectNet-7 benchmark dataset.
 You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.
 JSON schema:
 {

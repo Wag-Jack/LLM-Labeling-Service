@@ -8,6 +8,7 @@ google-cloud-speech
 google-cloud-translate
 google-genai
 huggingface-hub
+kagglehub
 matplotlib
 ibm-watson
 modernmt

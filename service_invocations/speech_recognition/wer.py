@@ -2,7 +2,10 @@ import re
 
 import pandas as pd
 
-from service_invocations.core.oracle_utils import normalize_id as _normalize_id
+from service_invocations.core.oracle_utils import (
+    normalize_id as _normalize_id,
+    oracle_id_map as _oracle_id_map,
+)
 
 
 _NON_WORD_RE = re.compile(r"[^a-z0-9' ]+")
@@ -74,10 +77,9 @@ def compute_wer_rows(results_by_service, oracle_results, edacc_data):
         raise ValueError("No speech results provided for WER calculation.")
 
     transcripts_by_service = _build_transcripts_by_service(results_by_service)
-    oracle_transcripts = dict(zip(
-        oracle_results["id"].map(_normalize_id),
-        oracle_results["llm_oracle"],
-    ))
+    # Tolerant lookup: a model that produced no oracle rows yields {} rather
+    # than raising KeyError; oracle_ref is then None and oracle_wer falls to None.
+    oracle_transcripts = _oracle_id_map(oracle_results)
 
     rows = []
     for _, row in edacc_data.iterrows():

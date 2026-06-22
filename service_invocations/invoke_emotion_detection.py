@@ -134,7 +134,7 @@ def _write_emotion_outputs(results_dir, label_results, oracle_results, label_df,
 
 @mirrored_run(_TASK_NAME)
 def run_emotion_detection(
-    vea_df: pd.DataFrame,
+    affectnet_df: pd.DataFrame,
     services_path: Path | None = None,
     models_path: Path | None = None,
 ):
@@ -143,8 +143,8 @@ def run_emotion_detection(
     if models_path is None:
         models_path = Path.cwd() / "config" / "models.yaml"
 
-    if vea_df is None:
-        raise ValueError("vea_df is required. Load data in main before invoking.")
+    if affectnet_df is None:
+        raise ValueError("affectnet_df is required. Load data in main before invoking.")
 
     enabled_services = _load_enabled_entries(services_path, _TASK_NAME)
     if not enabled_services:
@@ -160,7 +160,7 @@ def run_emotion_detection(
     mv_dir.mkdir(parents=True, exist_ok=True)
     print(f"--- Results: {results_dir} ---")
 
-    expected_count = len(vea_df)
+    expected_count = len(affectnet_df)
     resuming = rc.is_continue()
     results: dict[str, pd.DataFrame] = {}
     for service_name in enabled_services:
@@ -181,7 +181,7 @@ def run_emotion_detection(
                 print(f"[resume] {service_name}: already complete — skipping.")
                 results[service_name] = done
                 continue
-        results[service_name] = runner(vea_df, results_path=results_path)
+        results[service_name] = runner(affectnet_df, results_path=results_path)
 
     if results:
         print("--- Service Failure Report ---")
@@ -189,24 +189,24 @@ def run_emotion_detection(
         save_failure_report(failure_report, results_dir)
         print_failure_summary(failure_report, _TASK_NAME)
 
-    label_df = vea_df
+    label_df = affectnet_df
     label_results = results
     if results:
         print("--- SDS (sample-based discriminatory sampling) ---")
         discrimination = compute_discrimination(
-            results, vea_df["id"].tolist(), output_kind=_OUTPUT_KIND
+            results, affectnet_df["id"].tolist(), output_kind=_OUTPUT_KIND
         )
         save_discrimination(discrimination, sds_dir)
         if SDS_TOP_K is not None and SDS_TOP_K > 0 and not discrimination.empty:
             top_ids = select_top_k(discrimination, SDS_TOP_K)
             print(f"--- SDS: restricting downstream labeling to top {len(top_ids)} samples ---")
-            label_df = filter_dataset(vea_df, id_column="id", keep_ids=top_ids)
+            label_df = filter_dataset(affectnet_df, id_column="id", keep_ids=top_ids)
             label_results = filter_service_results(results, top_ids)
 
         if RUN_MAJORITY_VOTING:
             print("--- Majority Voting (service-output baseline oracle) ---")
             mv = majority_vote(
-                results, vea_df["id"].tolist(), output_kind=_OUTPUT_KIND
+                results, affectnet_df["id"].tolist(), output_kind=_OUTPUT_KIND
             )
             save_majority_voting(mv, mv_dir)
 

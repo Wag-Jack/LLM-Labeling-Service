@@ -41,7 +41,7 @@ def get_prompt(prompt_name: str, **substitutions: str) -> str:
 
 
 def generate_oracle_emotions(
-    vea_data,
+    affectnet_data,
     prompt_name: str,
     use_existing: bool = False,
     results_dir: Path | None = None,
@@ -79,7 +79,7 @@ def generate_oracle_emotions(
 
     samples = [
         {"id": row["id"], "image": row["image"]}
-        for _, row in vea_data.iterrows()
+        for _, row in affectnet_data.iterrows()
     ]
 
     pending_models: list[str] = []
@@ -160,9 +160,14 @@ def generate_oracle_emotions(
         write_oracle(task_dir, _TASK_NAME, prompt_name, model_name, rows)
         if is_final:
             full_slice = load_completed_rows(task_dir, "oracle", prompt_name, model_name)
-            results_by_model[model_name] = (
-                full_slice if not full_slice.empty else pd.DataFrame(rows)
-            )
+            if not full_slice.empty:
+                results_by_model[model_name] = full_slice
+            elif rows:
+                results_by_model[model_name] = pd.DataFrame(rows)
+            # else: this model produced no oracle rows (e.g. it was permanently
+            # unavailable). Leave it unregistered rather than storing an empty,
+            # column-less pd.DataFrame([]) — that frame later crashed the metric
+            # layer with KeyError: 'id'.
 
     if pending_models:
         run_with_failover(

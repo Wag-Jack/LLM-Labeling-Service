@@ -44,7 +44,7 @@ def run_modern_mt(europarl_data, results_path: Path | None = None):
         translation = mmt.translate("en", "fr", english)
         latency_ms = (time.perf_counter() - start_time) * 1000.0
         french = translation.translation or ""
-        print(french)
+        print(f"  -> {french}", flush=True)
 
         cost = record_service_call(
             _TASK_NAME, _SERVICE_NAME, sample_id, characters=len(english or "")

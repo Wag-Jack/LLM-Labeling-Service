@@ -68,23 +68,43 @@ language_translation:
       usd_per_million_chars: 8.0  # Usage-based ~$0.000008/char (verify)
 
 emotion_detection:
+  aws_rekognition:
+    enabled: false
+    pricing:
+      unit: image
+      usd_per_image: 0.001  # DetectFaces tier 1, $1 / 1000 images (verify)
+  luxand_facesdk:
+    enabled: false
+    pricing:
+      unit: image
+      usd_per_image: 0.01  # Approx; Luxand.cloud bills per monthly plan, not per call (verify)
   faceplusplus:
     enabled: false
     pricing:
       unit: image
       usd_per_image: 0.001  # Detect API paid tier (verify; free concurrency tier exists)
-  microsoft_azure_face:
+  imentiv:
     enabled: false
     pricing:
       unit: image
-      usd_per_image: 0.001  # Face API S0, $1 / 1000 transactions (verify)
-  aws_rekognition:
-    enabled: true
+      usd_per_image: 0.001  # Approx; Imentiv bills per credit/plan, not a public per-image list price (verify)
+  skybiometry:
+    # DISABLED: mood/emotion is not provisioned on this API key. Two issues were
+    # found and only the first is a code bug:
+    #   1. (fixed) the old parser misread mood's shape -- per the live docs,
+    #      faces/detect returns mood as {value, confidence} plus seven sibling
+    #      per-emotion attributes, NOT a nested per-emotion dict; the old code
+    #      iterated mood.items() and dropped every result. services/skybiometry.py
+    #      now parses the documented shape and uses the "aggressive" detector
+    #      (faces register fine -- detect returns 1 tag).
+    #   2. (blocker) this key does NOT return mood. Live-verified 2026-06-17 with
+    #      ample quota: attributes=all returns every attribute EXCEPT mood and
+    #      ethnicity; attributes=mood is accepted (no BAD_ATTRIBUTES) but returns
+    #      only `face`. So mood is gated at the account/plan level on SkyBiometry,
+    #      not in code. Enable mood for the key (SkyBiometry dashboard / support),
+    #      confirm with the self-test in services/README.md, then flip to true --
+    #      no code change needed.
+    enabled: false
     pricing:
       unit: image
-      usd_per_image: 0.001  # DetectFaces tier 1, $1 / 1000 images (verify)
-  luxand_facesdk:
-    enabled: true
-    pricing:
-      unit: image
-      usd_per_image: 0.01  # Approx; Luxand.cloud bills per monthly plan, not per call (verify)
+      usd_per_image: 0.001  # Approx; SkyBiometry bills per monthly plan, not per call (verify)

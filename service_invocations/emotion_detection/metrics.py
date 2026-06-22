@@ -2,8 +2,8 @@
 
 Mirrors the role that wer.py plays for ASR and comet.py plays for MT:
 score each service's predictions against two references (the LLM oracle
-and the human ground-truth label from VEA), producing per-sample counts
-and a per-service summary.
+and the human ground-truth label from AffectNet-7), producing per-sample
+counts and a per-service summary.
 
 Per-class precision/recall/F1 are computed for every canonical emotion;
 the summary also reports accuracy along with macro, micro, and weighted
@@ -18,7 +18,10 @@ from typing import Dict, List, Sequence
 
 import pandas as pd
 
-from service_invocations.core.oracle_utils import normalize_id as _normalize_id
+from service_invocations.core.oracle_utils import (
+    normalize_id as _normalize_id,
+    oracle_id_map as _oracle_id_map,
+)
 from service_invocations.emotion_detection.services._shared import (
     CANONICAL_EMOTIONS,
     label_to_name,
@@ -217,7 +220,7 @@ def _aggregate(counts: Dict[str, Dict[str, int]]):
 def compute_emotion_rows(
     results_by_service,
     oracle_results,
-    vea_data,
+    affectnet_data,
     labels: Sequence[str] = CANONICAL_EMOTIONS,
 ):
     """Per-sample, per-service correctness rows (long format)."""
@@ -225,15 +228,12 @@ def compute_emotion_rows(
         raise ValueError("No emotion service results provided for metric calculation.")
 
     predictions_by_service = _build_predictions_by_service(results_by_service)
-    oracle_by_id = dict(
-        zip(
-            oracle_results["id"].map(_normalize_id),
-            oracle_results["llm_oracle"].map(_oracle_top_emotion),
-        )
-    )
+    # Tolerant lookup: a model that produced no oracle rows yields {} rather
+    # than raising KeyError; oracle_label is then "" and oracle_correct is 0.
+    oracle_by_id = _oracle_id_map(oracle_results, transform=_oracle_top_emotion)
 
     rows: List[Dict] = []
-    for _, row in vea_data.iterrows():
+    for _, row in affectnet_data.iterrows():
         sample_id = row["id"]
         sample_id_key = _normalize_id(sample_id)
         human_label = _normalize_label(label_to_name(row.get("label")))
@@ -263,7 +263,7 @@ def compute_emotion_summary_rows(
 
     Two reference frames are reported side by side:
       - oracle_*: service prediction vs LLM oracle label
-      - human_*:  service prediction vs VEA ground-truth label
+      - human_*:  service prediction vs AffectNet-7 ground-truth label
     """
     counts_df = pd.DataFrame(per_sample_rows)
     summary_rows: List[Dict] = []

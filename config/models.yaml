@@ -1,8 +1,8 @@
 models:
-  gemini_3_flash:
+  gemini_3_5_flash:
     enabled: true
     provider: gemini
-    model_id: gemini-3-flash
+    model_id: gemini-3.5-flash
     temperature: 0
     # USD per 1M tokens. Public list prices (verify against current Google docs).
     # audio_input_per_million_usd applies to the audio portion of the prompt;

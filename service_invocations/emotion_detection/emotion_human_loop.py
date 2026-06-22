@@ -97,7 +97,7 @@ def _extract_top_emotion(service_output: str | None) -> str:
 
 def human_loop_emotions(
     results_by_service: dict[str, pd.DataFrame],
-    vea_data: pd.DataFrame,
+    affectnet_data: pd.DataFrame,
     prompt_name: str,
     confidence_threshold: float = _CONFIDENCE_THRESHOLD,
     results_dir: Path | None = None,
@@ -148,12 +148,12 @@ def human_loop_emotions(
 
     ground_truth = dict(
         zip(
-            vea_data["id"].map(_normalize_id),
-            vea_data[_GROUND_TRUTH_COLUMN].map(label_to_name),
+            affectnet_data["id"].map(_normalize_id),
+            affectnet_data[_GROUND_TRUTH_COLUMN].map(label_to_name),
         )
     )
-    image_files = vea_data["image"].tolist()
-    ids = vea_data["id"].tolist()
+    image_files = affectnet_data["image"].tolist()
+    ids = affectnet_data["id"].tolist()
 
     samples = [
         {"id": sample_id, "image": image_file}

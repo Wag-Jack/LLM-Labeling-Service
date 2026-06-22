@@ -44,7 +44,7 @@ def run_assemblyai(edacc_data, results_path: Path | None = None):
         transcript = transcriber.transcribe(audio_file)
         latency_ms = (time.perf_counter() - start_time) * 1000.0
         text = transcript.text or ""
-        print(text)
+        print(f"  -> {text}", flush=True)
 
         cost = record_service_call(
             _TASK_NAME, _SERVICE_NAME, sample_id, minutes=audio_minutes(row)

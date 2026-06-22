@@ -65,7 +65,7 @@ def run_micro_translation(europarl_data, results_path: Path | None = None):
         payload = response.json()
         latency_ms = (time.perf_counter() - start_time) * 1000.0
         french = payload[0]["translations"][0]["text"] if payload else ""
-        print(french)
+        print(f"  -> {french}", flush=True)
 
         cost = record_service_call(
             _TASK_NAME, _SERVICE_NAME, sample_id, characters=len(english or "")
