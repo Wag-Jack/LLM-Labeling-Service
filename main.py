@@ -7,6 +7,7 @@ from data_management.edacc import load_edacc
 from data_management.en_fr import load_en_fr
 from data_management.affectnet import load_affectnet
 from benchmark_prompts import run_all_prompts
+from pipeline_smoke_test import run_smoke_test
 
 # Amount of samples from each dataset to run through services
 NUM_SAMPLES = 100
@@ -141,17 +142,18 @@ def main():
             "2.) FER - Facial Emotion Detection\n"
             "3.) MT - Machine Translation\n"
             "4.) Benchmark all prompts\n"
-            "5.) Exit\n"
+            "5.) Smoke test - quick check that models/services/prompts work\n"
+            "6.) Exit\n"
             "Select: "
         )
 
         try:
             choice = int(command.strip())
         except ValueError:
-            print("Invalid. Select an option between 1-5.")
+            print("Invalid. Select an option between 1-6.")
             continue
 
-        if 1 <= choice < 6:
+        if 1 <= choice < 7:
             match choice:
                 case 1:
                     _run_task("asr")
@@ -162,9 +164,11 @@ def main():
                 case 4:
                     _run_benchmark()
                 case 5:
+                    run_smoke_test()
+                case 6:
                     break
         else:
-            print("Invalid. Select an option between 1-5.")
+            print("Invalid. Select an option between 1-6.")
 
 
 if __name__ == "__main__":
