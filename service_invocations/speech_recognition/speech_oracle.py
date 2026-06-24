@@ -111,10 +111,6 @@ def generate_oracle_transcripts(
             audio_file = sample["audio"]
             id_key = _normalize_id(sample_id)
             if id_key in done_ids:
-                print(
-                    f"[resume] Skip speech_oracle ({model_name}) "
-                    f"sample={sample_id} (already done)."
-                )
                 return None
             print(f"LLM Oracle Transcript ({model_name}): {audio_file}")
 

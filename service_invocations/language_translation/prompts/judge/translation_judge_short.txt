@@ -11,5 +11,3 @@ English source: {source_text}
 Systems (name: translation):
 {service_blocks}
 If you do not receive the text, set "llm_translation" to null, "winner" to null, and every score in "scores" to null.
-Do NOT mention that you need the text, only give the JSON schema output.
-If you violate this, the output will be discarded.

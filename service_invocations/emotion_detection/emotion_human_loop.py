@@ -99,6 +99,7 @@ def human_loop_emotions(
     results_by_service: dict[str, pd.DataFrame],
     affectnet_data: pd.DataFrame,
     prompt_name: str,
+    paradigm: str = _PARADIGM,
     confidence_threshold: float = _CONFIDENCE_THRESHOLD,
     results_dir: Path | None = None,
     services_path: Path | None = None,
@@ -113,7 +114,12 @@ def human_loop_emotions(
         models_path = Path.cwd() / "config" / "models.yaml"
     task_dir.mkdir(parents=True, exist_ok=True)
 
-    prompt_path = _resolve_prompt_path(_PROMPTS_ROOT, _PARADIGM, prompt_name)
+    prompt_path = _resolve_prompt_path(_PROMPTS_ROOT, paradigm, prompt_name)
+    if paradigm != _PARADIGM:
+        # A non-default paradigm (e.g. the no-threshold variant) reuses the same
+        # prompt stems, so suffix the storage key to keep its rows distinct from
+        # the standard human-loop rows in human_loop.csv and the resume guard.
+        prompt_name = f"{prompt_name}__{paradigm.replace('human-loop-', '')}"
 
     enabled_services = _load_enabled_entries(services_path, task_name)
     enabled_models = get_enabled_models(models_path)
@@ -179,10 +185,6 @@ def human_loop_emotions(
             image_file = sample["image"]
             id_key = _normalize_id(sample_id)
             if id_key in done_ids:
-                print(
-                    f"[resume] Skip emotion_human_loop ({model_name}) "
-                    f"sample={sample_id} (already done)."
-                )
                 return None
             print(f"LLM Human-Loop ({model_name}): {image_file}")
 

@@ -7,7 +7,7 @@ JSON schema:
   "scores": { "<service_name>": float in 0.0-1.0, ... one entry per system below ... },
   "confidence": float in 0.0-1.0
 }
-Report "confidence" honestly: the pipeline routes any sample below 0.85 to a human reviewer. Always give your best guess and set "winner" to the highest-scoring system. Use the system names below verbatim as keys; include every system.
+Report "confidence" honestly. Always give your best guess and set "winner" to the highest-scoring system. Use the system names below verbatim as keys; include every system.
 English source: {source_text}
 Systems (name: translation):
 {service_blocks}

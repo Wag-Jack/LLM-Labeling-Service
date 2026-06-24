@@ -133,10 +133,6 @@ def judge_translations(
             english = sample["english"]
             id_key = _normalize_id(sample_id)
             if id_key in done_ids:
-                print(
-                    f"[resume] Skip language_judge ({model_name}) "
-                    f"sample={sample_id} (already done)."
-                )
                 return None
             print(f"LLM Judging ({model_name}): {english}")
 

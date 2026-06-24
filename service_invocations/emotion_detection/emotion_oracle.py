@@ -116,10 +116,6 @@ def generate_oracle_emotions(
             image_file = sample["image"]
             id_key = _normalize_id(sample_id)
             if id_key in done_ids:
-                print(
-                    f"[resume] Skip emotion_oracle ({model_name}) "
-                    f"sample={sample_id} (already done)."
-                )
                 return None
             print(f"LLM Oracle Emotion ({model_name}): {image_file}")
 

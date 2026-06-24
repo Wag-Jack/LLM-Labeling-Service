@@ -151,10 +151,6 @@ def judge_emotions(
             image_file = sample["image"]
             id_key = _normalize_id(sample_id)
             if id_key in done_ids:
-                print(
-                    f"[resume] Skip emotion_judge ({model_name}) "
-                    f"sample={sample_id} (already done)."
-                )
                 return None
             print(f"LLM Judging ({model_name}): {image_file}")
 

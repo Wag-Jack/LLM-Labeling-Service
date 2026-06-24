@@ -111,10 +111,6 @@ def generate_oracle_translations(
             english_text = sample["english"]
             id_key = _normalize_id(sample_id)
             if id_key in done_ids:
-                print(
-                    f"[resume] Skip language_oracle ({model_name}) "
-                    f"sample={sample_id} (already done)."
-                )
                 return None
             print(f"LLM Oracle Translation ({model_name}): {sample_id}")
 

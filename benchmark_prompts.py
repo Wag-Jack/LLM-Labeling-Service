@@ -167,6 +167,14 @@ def _benchmark_speech(edacc_df, service_results):
                 service_results, edacc_df, prompt_name=prompt, results_dir=rc.task_results_dir("speech_recognition"),
             )
 
+        for prompt in _list_prompts(prompts_root, "human-loop-no-threshold", "speech_recognition"):
+            print(f"=== [speech] human-loop-no-threshold prompt: {prompt} ===")
+            speech_human_loop.human_loop_transcripts(
+                service_results, edacc_df, prompt_name=prompt,
+                paradigm="human-loop-no-threshold",
+                results_dir=rc.task_results_dir("speech_recognition"),
+            )
+
 
 def _benchmark_language(europarl_df, service_results):
     if not service_results:
@@ -199,6 +207,14 @@ def _benchmark_language(europarl_df, service_results):
             print(f"=== [language] human-loop prompt: {prompt} ===")
             language_human_loop.human_loop_translations(
                 service_results, europarl_df, prompt_name=prompt, results_dir=rc.task_results_dir("language_translation"),
+            )
+
+        for prompt in _list_prompts(prompts_root, "human-loop-no-threshold", "language_translation"):
+            print(f"=== [language] human-loop-no-threshold prompt: {prompt} ===")
+            language_human_loop.human_loop_translations(
+                service_results, europarl_df, prompt_name=prompt,
+                paradigm="human-loop-no-threshold",
+                results_dir=rc.task_results_dir("language_translation"),
             )
 
 
@@ -235,6 +251,14 @@ def _benchmark_emotion(affectnet_df, service_results):
                 service_results, affectnet_df, prompt_name=prompt, results_dir=rc.task_results_dir("emotion_detection"),
             )
 
+        for prompt in _list_prompts(prompts_root, "human-loop-no-threshold", "emotion_detection"):
+            print(f"=== [emotion] human-loop-no-threshold prompt: {prompt} ===")
+            emotion_human_loop.human_loop_emotions(
+                service_results, affectnet_df, prompt_name=prompt,
+                paradigm="human-loop-no-threshold",
+                results_dir=rc.task_results_dir("emotion_detection"),
+            )
+
 
 def _compute_plan(*tasks) -> dict:
     """Total model-sample jobs across the benchmark, for progress percentages.
@@ -259,7 +283,7 @@ def _compute_plan(*tasks) -> dict:
             continue
         n_prompts = sum(
             len(_list_prompts(prompts_root, paradigm, task_name))
-            for paradigm in ("oracle", "judge", "human-loop")
+            for paradigm in ("oracle", "judge", "human-loop", "human-loop-no-threshold")
         )
         total += len(df) * n_models * n_prompts
     if not total:

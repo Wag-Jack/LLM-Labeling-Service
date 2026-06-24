@@ -28,6 +28,24 @@ LLMAAS_ACCURACY_KEY = ("prompt", "model", "id")
 LLMAAS_SUMMARY_KEY = ("prompt", "model")
 
 
+def _row_keys(df: pd.DataFrame, keys: Sequence[str]) -> pd.Series:
+    """Build a per-row join key that is stable across the CSV round-trip.
+
+    The ``id`` column is normalized with ``normalize_id`` rather than
+    compared raw: a written zero-padded id like ``"0001"`` is reloaded by
+    pandas as the int ``1``, so comparing the string forms (``"0001"`` from
+    an in-memory row vs ``"1"`` from the reloaded CSV) would never match.
+    That silently defeated the upsert, appending the whole cumulative batch
+    as duplicate rows on every checkpoint/resume write. Columns are joined
+    with a NUL separator so adjacent key parts cannot collide.
+    """
+    parts = {
+        k: (df[k].map(_normalize_id) if k == "id" else df[k].astype(str))
+        for k in keys
+    }
+    return pd.DataFrame(parts).agg("\x00".join, axis=1)
+
+
 def _merge(existing: pd.DataFrame | None, new: pd.DataFrame, key: Sequence[str]) -> pd.DataFrame:
     if new.empty:
         return existing if existing is not None else new
@@ -48,9 +66,8 @@ def _merge(existing: pd.DataFrame | None, new: pd.DataFrame, key: Sequence[str])
         merged = pd.concat([existing, new], ignore_index=True)
         return merged.reset_index(drop=True)
 
-    mask = pd.Series(False, index=existing.index)
-    new_keys = new[merge_keys].astype(str).agg("".join, axis=1)
-    existing_keys = existing[merge_keys].astype(str).agg("".join, axis=1)
+    new_keys = _row_keys(new, merge_keys)
+    existing_keys = _row_keys(existing, merge_keys)
     mask = existing_keys.isin(set(new_keys))
     kept = existing[~mask]
     merged = pd.concat([kept, new], ignore_index=True)

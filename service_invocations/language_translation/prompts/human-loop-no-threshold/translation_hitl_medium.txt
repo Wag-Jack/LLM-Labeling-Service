@@ -1,0 +1,17 @@
+Please review N French translations of the same English source from the EuroParl corpus. Score each one and commit to your best translation. You do not have access to a reference.
+You MUST return ONLY valid JSON. Do not include markdown, code fences, or explanations.
+JSON schema:
+{
+  "llm_translation": string,
+  "winner": string (name of the highest-scoring system; must match a name below),
+  "scores": { "<service_name>": float in 0.0-1.0, ... one entry per system below ... },
+  "confidence": float in 0.0-1.0
+}
+Use the system names below verbatim as keys of "scores"; include every system.
+English source: {source_text}
+Systems (name: translation):
+{service_blocks}
+Estimate your confidence in "llm_translation" as a float in 0.0-1.0 and report it honestly - lower it when the translations are similar in quality, the source is ambiguous, or specialized terminology makes verification difficult. Always record your best guess in "llm_translation" and set "winner" to the highest-scoring system.
+If you do not receive the text, set "llm_translation" to null, "winner" to null, and every score in "scores" to null.
+Do NOT mention that you need the text, only give the JSON schema output.
+If you violate this, the output will be discarded.

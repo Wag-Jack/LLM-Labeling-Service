@@ -28,6 +28,14 @@ speech_recognition:
     asr_hitl_short: true
     asr_hitl_medium: true
     asr_hitl_long: true
+  # Confidence-blind HITL variants (no mention of the 0.85 routing threshold).
+  # Disabled by default so they never mix into the standard human-loop results;
+  # flip to true to run them (their rows land in human_loop.csv suffixed
+  # "__no-threshold"). If this whole section is removed, the fallback runs them ALL.
+  human-loop-no-threshold:
+    asr_hitl_short: false
+    asr_hitl_medium: false
+    asr_hitl_long: false
 
 language_translation:
   oracle:
@@ -42,6 +50,10 @@ language_translation:
     translation_hitl_short: true
     translation_hitl_medium: true
     translation_hitl_long: true
+  human-loop-no-threshold:
+    translation_hitl_short: false
+    translation_hitl_medium: false
+    translation_hitl_long: false
 
 emotion_detection:
   oracle:
@@ -56,3 +68,7 @@ emotion_detection:
     fer_hitl_short: true
     fer_hitl_medium: true
     fer_hitl_long: true
+  human-loop-no-threshold:
+    fer_hitl_short: false
+    fer_hitl_medium: false
+    fer_hitl_long: false
