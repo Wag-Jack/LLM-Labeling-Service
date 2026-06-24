@@ -34,6 +34,21 @@ from service_invocations.core.llm_adapters import ModelUnavailableError
 
 _DEFAULT_COOLDOWN = float(os.getenv("LLM_FAILOVER_COOLDOWN", "30.0"))
 _DEFAULT_DRAIN_PASSES = int(os.getenv("LLM_FAILOVER_DRAIN_PASSES", "3"))
+
+# TEMPORARY (remove when gemini_3_5_flash is replaced): gemini_3_5_flash has a
+# much tighter rate-limit quota than the other models and routinely exhausts its
+# retries mid-run, getting its remaining samples dropped. Give just that model a
+# longer cooldown between drain passes so its quota window has time to recover;
+# every other model keeps the default. The drain sleep is shared across all
+# pending models in a pass, so a pass waits the longest cooldown among the models
+# still pending — in practice gemini_3_5_flash is the lone late straggler, so it
+# is the only one that triggers the longer wait. Override via env, e.g.
+# LLM_FAILOVER_COOLDOWN_GEMINI_3_5_FLASH=240.
+_MODEL_COOLDOWN_OVERRIDES: Dict[str, float] = {
+    "gemini_3_5_flash": float(
+        os.getenv("LLM_FAILOVER_COOLDOWN_GEMINI_3_5_FLASH", "180.0")
+    ),
+}
 # How often to checkpoint partial progress within a model's pass. ``0`` disables
 # mid-batch checkpoints (persist only at pass/defer boundaries, the old
 # behavior); ``1`` flushes after every sample.
@@ -165,16 +180,22 @@ def run_with_failover(
         if not pending:
             break
         is_last_pass = pass_idx == max_drain_passes - 1
-        if cooldown_seconds > 0:
+        # Per-model cooldown: a pass waits the longest cooldown among the models
+        # still pending, so a tighter-quota model (see _MODEL_COOLDOWN_OVERRIDES)
+        # gets its longer recovery window without penalizing passes it isn't in.
+        effective_cooldown = max(
+            _MODEL_COOLDOWN_OVERRIDES.get(m, cooldown_seconds) for m in pending
+        )
+        if effective_cooldown > 0:
             print(
                 f"[failover] Drain pass {pass_idx + 1}/{max_drain_passes}: "
                 f"{len(pending)} model(s) pending "
                 f"({', '.join(sorted(pending))}). "
-                f"Cooling down {cooldown_seconds:.0f}s.",
+                f"Cooling down {effective_cooldown:.0f}s.",
                 file=sys.stderr,
                 flush=True,
             )
-            time.sleep(cooldown_seconds)
+            time.sleep(effective_cooldown)
         next_pending: Dict[str, List[Any]] = {}
         for model, batch in pending.items():
             remaining = _run_batch(model, batch)

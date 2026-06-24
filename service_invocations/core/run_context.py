@@ -25,10 +25,20 @@ Resume: a run whose ``run_status.json`` is not ``finished`` can be continued.
 Continuing reuses the same folder (so the per-sample skip logic in the oracle /
 judge / human-loop writers picks up where it left off) and the same
 ``invocation_report`` log file.
+
+Settings are pinned per run. At creation a run snapshots its settings into its
+own folder — the ``config/*.yaml`` files into ``<run>/config`` and the in-code
+``invoke_*`` tunables into ``<run>/run_settings.json`` (see
+:mod:`run_settings`). All config reads resolve through :func:`config_path`, so a
+run always reads its own snapshot: resuming it reuses the exact settings it began
+with even if the live ``config/`` (or the in-code defaults) changed in the
+meantime, while a brand-new run snapshots the current settings. Two runs can
+therefore carry different settings at the same time.
 """
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -41,6 +51,14 @@ _INVOCATION_ROOT = Path.cwd() / "invocation_report"
 
 _STATUS_FILE = "run_status.json"
 _SAMPLES_FILE = "samples.csv"
+
+# Each run is pinned to the settings it began with. The live config/ directory
+# is snapshotted into the run folder at creation; all config reads resolve
+# through config_path() so an active run reads its own snapshot (kept fixed
+# across resumes) while everything else reads the live config.
+_LIVE_CONFIG_DIR = Path.cwd() / "config"
+_CONFIG_SNAPSHOT_DIRNAME = "config"
+_CONFIG_FILES = ("services.yaml", "models.yaml", "prompts.yaml")
 
 _active_run: "RunInfo | None" = None
 
@@ -97,6 +115,28 @@ def task_services_dir(task: str) -> Path:
     return task_results_dir(task) / "services"
 
 
+def config_dir() -> Path:
+    """Directory the active run reads its settings (``*.yaml``) from.
+
+    An active run reads its own per-run snapshot (``<run>/config``), so its
+    settings stay fixed for the whole run — including every resume — regardless
+    of later edits to the live ``config/``. With no active run (or a run with no
+    snapshot, e.g. one created before snapshots existed) the live ``config/`` is
+    used.
+    """
+    if _active_run is not None:
+        snapshot = _active_run.dir / _CONFIG_SNAPSHOT_DIRNAME
+        if snapshot.is_dir():
+            return snapshot
+    return _LIVE_CONFIG_DIR
+
+
+def config_path(name: str) -> Path:
+    """Resolve a config file (``services.yaml`` / ``models.yaml`` / ``prompts.yaml``)
+    against the active run's snapshot, falling back to the live ``config/``."""
+    return config_dir() / name
+
+
 # --------------------------------------------------------------------------
 # Run lifecycle
 # --------------------------------------------------------------------------
@@ -142,7 +182,63 @@ def start_run(
     info.dir.mkdir(parents=True, exist_ok=True)
     _active_run = info
     _write_status(info, status="in_progress")
+    _snapshot_config(info)
+    _snapshot_or_restore_settings(info)
     return info
+
+
+def _snapshot_config(info: RunInfo) -> None:
+    """Pin the run's file-based settings: copy live ``config/*.yaml`` into the
+    run folder, once.
+
+    Files already present in the snapshot are left untouched, so resuming a run
+    preserves the settings it began with even if the live config has since
+    changed. (A run created before snapshots existed has none, so on its first
+    resume the current live config is captured — the only settings available.)
+    """
+    dest = info.dir / _CONFIG_SNAPSHOT_DIRNAME
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+        for name in _CONFIG_FILES:
+            target = dest / name
+            if target.exists():
+                continue
+            src = _LIVE_CONFIG_DIR / name
+            if src.exists():
+                shutil.copy2(src, target)
+    except OSError:
+        # Snapshotting is best-effort: config_path() falls back to live config.
+        pass
+
+
+def _snapshot_or_restore_settings(info: RunInfo) -> None:
+    """Pin/restore the in-code run settings (the ``invoke_*`` module tunables).
+
+    New run -> capture the current values into ``run_settings.json``. Resumed
+    run -> apply the snapshotted values back onto the modules so the run
+    continues with the settings it started with. Best-effort; never raises into
+    the caller.
+    """
+    from service_invocations.core import run_settings
+
+    path = info.dir / run_settings.SETTINGS_FILE
+    try:
+        if path.exists():
+            snapshot = json.loads(path.read_text(encoding="utf-8"))
+            if info.is_continue:
+                applied = run_settings.apply_settings(snapshot)
+                if applied:
+                    print(
+                        f"[settings] restored {len(applied)} in-code setting(s) "
+                        f"from this run's snapshot."
+                    )
+        else:
+            path.write_text(
+                json.dumps(run_settings.collect_settings(), indent=2),
+                encoding="utf-8",
+            )
+    except Exception:  # noqa: BLE001 - settings bookkeeping must never crash a run
+        pass
 
 
 def attach_run(run_dir: Path) -> RunInfo:
@@ -173,9 +269,54 @@ def attach_run(run_dir: Path) -> RunInfo:
     return info
 
 
+def _progress_is_complete(payload: dict[str, Any]) -> bool:
+    """Did the run actually process everything it planned?
+
+    The failover runner *gives up* on samples it can't complete (e.g. a model
+    rate-limited past its drain passes) rather than crashing, so the run loop
+    returns normally even when slices are short. We decide completeness from the
+    progress totals that ``record_progress`` wrote:
+
+    * If a planned ``total_samples`` is known, the run is complete only when
+      every planned sample was processed. This also catches slices that never
+      started (a model that failed from its first sample), since those are
+      missing from ``samples_done`` but still counted in the plan.
+    * Otherwise fall back to the per-slice tally: complete iff at least one
+      slice started and none were left short.
+
+    With no progress recorded at all we can't prove incompleteness, so we treat
+    the run as complete (preserving the prior unconditional behaviour).
+    """
+    totals = (payload.get("progress") or {}).get("totals") or {}
+    planned = totals.get("samples_total_planned") or (payload.get("plan") or {}).get("total_samples")
+    if planned:
+        return int(totals.get("samples_done", 0)) >= int(planned)
+    started = int(totals.get("slices_started", 0))
+    if started:
+        return int(totals.get("slices_complete", 0)) >= started
+    return True
+
+
 def mark_finished() -> None:
-    if _active_run is not None:
-        _write_status(_active_run, status="finished")
+    """Seal the active run.
+
+    Marks ``finished`` only when the run actually processed everything it
+    planned; otherwise marks ``incomplete`` so the resume picker keeps offering
+    it (``find_continuable_runs`` skips only ``finished`` runs). On resume the
+    paradigm modules skip already-complete samples, so a finished-as-incomplete
+    run just re-attempts the slices that were dropped.
+    """
+    if _active_run is None:
+        return
+    path = _active_run.dir / _STATUS_FILE
+    payload: dict[str, Any] = {}
+    if path.exists():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            payload = {}
+    status = "finished" if _progress_is_complete(payload) else "incomplete"
+    _write_status(_active_run, status=status)
 
 
 def end_run() -> None:
@@ -419,6 +560,8 @@ __all__ = [
     "is_continue",
     "task_results_dir",
     "task_services_dir",
+    "config_dir",
+    "config_path",
     "start_run",
     "attach_run",
     "mark_finished",
