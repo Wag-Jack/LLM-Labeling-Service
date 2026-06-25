@@ -33,9 +33,9 @@ speech_recognition:
   # flip to true to run them (their rows land in human_loop.csv suffixed
   # "__no-threshold"). If this whole section is removed, the fallback runs them ALL.
   human-loop-no-threshold:
-    asr_hitl_short: false
-    asr_hitl_medium: false
-    asr_hitl_long: false
+    asr_hitl_short: true
+    asr_hitl_medium: true
+    asr_hitl_long: true
 
 language_translation:
   oracle:
@@ -51,23 +51,23 @@ language_translation:
     translation_hitl_medium: true
     translation_hitl_long: true
   human-loop-no-threshold:
-    translation_hitl_short: false
-    translation_hitl_medium: false
-    translation_hitl_long: false
+    translation_hitl_short: true
+    translation_hitl_medium: true
+    translation_hitl_long: true
 
 emotion_detection:
   oracle:
-    fer_service_short: true
-    fer_service_medium: true
-    fer_service_long: true
+    fer_service_short: false
+    fer_service_medium: false
+    fer_service_long: false
   judge:
-    fer_judge_short: true
-    fer_judge_medium: true
-    fer_judge_long: true
+    fer_judge_short: false
+    fer_judge_medium: false
+    fer_judge_long: false
   human-loop:
-    fer_hitl_short: true
-    fer_hitl_medium: true
-    fer_hitl_long: true
+    fer_hitl_short: false
+    fer_hitl_medium: false
+    fer_hitl_long: false
   human-loop-no-threshold:
     fer_hitl_short: false
     fer_hitl_medium: false

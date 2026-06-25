@@ -16,6 +16,8 @@ from typing import Any, Callable, Dict, List
 import pandas as pd
 import yaml
 
+from service_invocations.core import run_context as rc
+
 
 _PRICING_CACHE: Dict[Path, Dict[str, Dict[str, float]]] = {}
 _LOCK = Lock()
@@ -71,7 +73,7 @@ def compute_cost(
     (text) prompt tokens are billed at ``input_per_million_usd``.
     """
     if models_path is None:
-        models_path = Path.cwd() / "config" / "models.yaml"
+        models_path = rc.config_path("models.yaml")
     pricing = _load_pricing(models_path).get(model_name)
     if pricing is None:
         return None
@@ -287,6 +289,55 @@ class CostTracker:
             df = pd.concat([existing, df], ignore_index=True)
         df.to_csv(log_path, index=False)
         return log_path
+
+    def seed_from_csv(self, path: Path, task_filter: str | None = None) -> int:
+        """Preload previously-logged rows from a ``cost.csv`` into this tracker.
+
+        On a resumed run the paradigm modules skip already-completed samples,
+        so those calls are never re-recorded on the session tracker. Without
+        seeding, ``write`` would replace the task slice on disk with only this
+        run's freshly-invoked subset and under-report the cumulative cost.
+        Seeding the prior rows back in makes ``write`` re-emit a complete
+        ledger. No-op when ``path`` is missing or has no matching rows; returns
+        the number of rows seeded. Should only be called on resume (not on a
+        fresh run, which intentionally discards prior results).
+        """
+        if not path.exists():
+            return 0
+        df = pd.read_csv(path)
+        if task_filter is not None and "task" in df.columns:
+            df = df[df["task"] == task_filter]
+        if df.empty:
+            return 0
+        cols = set(df.columns)
+
+        def _opt_int(v: Any) -> int | None:
+            return None if pd.isna(v) else int(v)
+
+        def _opt_float(v: Any) -> float | None:
+            return None if pd.isna(v) else float(v)
+
+        with _LOCK:
+            for _, row in df.iterrows():
+                status = "success"
+                if "status" in cols and not pd.isna(row["status"]):
+                    status = str(row["status"])
+                self.entries.append(
+                    CostEntry(
+                        timestamp=str(row.get("timestamp", "")),
+                        task=str(row.get("task", "")),
+                        paradigm=str(row.get("paradigm", "")),
+                        model=str(row.get("model", "")),
+                        sample_id=str(row.get("sample_id", "")),
+                        input_tokens=_opt_int(row.get("input_tokens")),
+                        output_tokens=_opt_int(row.get("output_tokens")),
+                        cost_usd=_opt_float(row.get("cost_usd")),
+                        latency_ms=_opt_float(row.get("latency_ms")) if "latency_ms" in cols else None,
+                        status=status,
+                        audio_input_tokens=_opt_int(row.get("audio_input_tokens")) if "audio_input_tokens" in cols else None,
+                    )
+                )
+        return int(len(df))
 
 
 _SESSION = CostTracker()

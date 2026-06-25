@@ -7,6 +7,7 @@ from service_invocations.core.cost_tracker import (
     session_tracker,
 )
 from service_invocations.core.model_failover import run_with_failover
+from service_invocations.core import run_context as rc
 from service_invocations.core.oracle_utils import (
     extract_oracle as _extract_oracle,
     is_fresh_run_requested as _is_fresh_run_requested,
@@ -45,7 +46,7 @@ def generate_oracle_translations(
 ):
     task_dir = results_dir if results_dir is not None else _DEFAULT_TASK_DIR
     if models_path is None:
-        models_path = Path.cwd() / "config" / "models.yaml"
+        models_path = rc.config_path("models.yaml")
     task_dir.mkdir(parents=True, exist_ok=True)
 
     prompt_path = _resolve_prompt_path(_PROMPTS_ROOT, _PARADIGM, prompt_name)

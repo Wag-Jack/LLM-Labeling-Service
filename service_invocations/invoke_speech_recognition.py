@@ -8,6 +8,7 @@ import yaml
 
 from service_invocations.core import run_context as rc
 from service_invocations.core.cost_tracker import session_tracker
+from service_invocations.core.oracle_utils import is_fresh_run_requested
 from service_invocations.core.service_cost import (
     format_cost_summary,
     session_service_tracker,
@@ -50,6 +51,12 @@ from service_invocations.speech_recognition.wer import compute_wer_rows, compute
 ORACLE_PROMPT = "asr_service_medium"
 JUDGE_PROMPT = "asr_judge_medium"
 HUMAN_LOOP_PROMPT = "asr_hitl_medium"
+# Same human-loop prompt stem, but run against the `human-loop-no-threshold`
+# paradigm (prompt that does NOT disclose the 0.85 confidence cutoff). Its rows
+# land in human_loop.csv under a `__no-threshold` prompt suffix, so the plots
+# graph the human-loop results with AND without the confidence cue side by side.
+# Set to "" to skip the no-threshold variant.
+HUMAN_LOOP_NO_THRESHOLD_PROMPT = "asr_hitl_medium"
 QUIET_SKIP_PROMPTS = False
 SDS_TOP_K: int | None = None
 RUN_MAJORITY_VOTING = True
@@ -132,9 +139,9 @@ def run_speech_recognition(
     models_path: Path | None = None,
 ):
     if services_path is None:
-        services_path = Path.cwd() / "config" / "services.yaml"
+        services_path = rc.config_path("services.yaml")
     if models_path is None:
-        models_path = Path.cwd() / "config" / "models.yaml"
+        models_path = rc.config_path("models.yaml")
 
     if edacc_df is None:
         raise ValueError("edacc_df is required. Load data in main before invoking.")
@@ -155,6 +162,14 @@ def run_speech_recognition(
 
     expected_count = len(edacc_df)
     resuming = rc.is_continue()
+    if resuming and not is_fresh_run_requested():
+        # Resumed runs skip already-finished samples, so their costs never
+        # re-enter the session tracker. Seed them from the prior CSVs so the
+        # cost logs written below stay cumulative instead of partial.
+        session_tracker().seed_from_csv(results_dir / "cost.csv", task_filter=_TASK_NAME)
+        session_service_tracker().seed_from_csv(
+            results_dir / "service_cost.csv", task_filter=_TASK_NAME
+        )
     results: dict[str, pd.DataFrame] = {}
     for service_name in enabled_services:
         print(f"--- {service_name} ---")
@@ -252,6 +267,22 @@ def run_speech_recognition(
         )
     elif not HUMAN_LOOP_PROMPT and not QUIET_SKIP_PROMPTS:
         print("--- Skipping LLM Human-Loop (HUMAN_LOOP_PROMPT is empty) ---")
+
+    if label_results and HUMAN_LOOP_NO_THRESHOLD_PROMPT:
+        print(
+            f"--- LLM Human-Loop, no-threshold prompt (prompt: {HUMAN_LOOP_NO_THRESHOLD_PROMPT}) ---"
+        )
+        human_loop_transcripts(
+            label_results,
+            label_df,
+            prompt_name=HUMAN_LOOP_NO_THRESHOLD_PROMPT,
+            paradigm="human-loop-no-threshold",
+            results_dir=results_dir,
+            services_path=services_path,
+            models_path=models_path,
+        )
+    elif not HUMAN_LOOP_NO_THRESHOLD_PROMPT and not QUIET_SKIP_PROMPTS:
+        print("--- Skipping no-threshold LLM Human-Loop (HUMAN_LOOP_NO_THRESHOLD_PROMPT is empty) ---")
 
     cost_log_path = session_tracker().write(results_root=results_dir, task_filter=_TASK_NAME)
     if cost_log_path is not None:

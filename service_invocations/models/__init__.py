@@ -8,6 +8,7 @@ import re
 import yaml
 
 from service_invocations.core.llm_adapters import LLMResponse, get_llm_adapter
+from service_invocations.core import run_context as rc
 
 
 _ENV_VAR_RE = re.compile(r"[^A-Za-z0-9]+")
@@ -90,7 +91,7 @@ def _resolve_temperature(entry: Dict[str, Any]) -> float:
 
 def get_enabled_models(models_path: Path | None = None) -> List[str]:
     if models_path is None:
-        models_path = Path.cwd() / "config" / "models.yaml"
+        models_path = rc.config_path("models.yaml")
     config = _load_models_config(models_path)
     models_cfg = _get_models_section(config)
     enabled = []
@@ -105,7 +106,7 @@ def get_model_generator(
     models_path: Path | None = None,
 ) -> Callable[[str, Dict[str, Any] | None, List[str] | None], LLMResponse]:
     if models_path is None:
-        models_path = Path.cwd() / "config" / "models.yaml"
+        models_path = rc.config_path("models.yaml")
     config = _load_models_config(models_path)
     models_cfg = _get_models_section(config)
     entry = _get_model_entry(models_cfg, model_name)

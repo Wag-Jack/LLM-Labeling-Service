@@ -2,6 +2,17 @@ assemblyai
 boto3
 azure-ai-inference
 datasets
+# Local FER libraries (emotion_detection). Both run on-device via TensorFlow.
+# tf-keras provides the legacy Keras 2 backend DeepFace/RetinaFace require under
+# Keras-3 TensorFlow. TensorFlow is capped at <2.18 because 2.18+ requires
+# protobuf>=5 / numpy>=2, which conflicts with unbabel-comet (protobuf<5,
+# numpy<2); 2.17 keeps the whole pipeline on one compatible set. OpenCV is
+# capped at <4.11 for the same numpy<2 reason.
+deepface
+fer
+tf-keras
+tensorflow<2.18
+opencv-python<4.11
 deepgram-sdk
 deepl
 google-cloud-speech
@@ -12,8 +23,9 @@ kagglehub
 matplotlib
 ibm-watson
 modernmt
-numpy
+numpy<2.0  # unbabel-comet requires <2; TensorFlow<2.18 also accepts it
 openai
+protobuf<5.0  # unbabel-comet requires <5; satisfied by TensorFlow<2.18
 pandas
 pillow
 PyYAML

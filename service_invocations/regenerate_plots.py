@@ -70,25 +70,34 @@ def _find_samples_csv(task_dir: Path, task: str) -> Path | None:
     return None
 
 
-def _backfill_llmaas_speech(task_dir: Path, samples_csv: Path) -> bool:
-    """Backfill llmaas_accuracy.csv / llmaas_summary.csv for a speech run.
+def _backfill_llmaas(
+    task_dir: Path,
+    samples_csv: Path,
+    *,
+    task: str,
+    ref_cols: tuple[str, ...],
+    compute_rows,
+    compute_summary,
+    transform=None,
+) -> bool:
+    """Backfill llmaas_accuracy.csv / llmaas_summary.csv for one task's run.
 
-    Scores each model's stored oracle transcript against the human reference
-    using the same WER machinery the live pipeline uses (reused verbatim), so
-    the numbers match a fresh run exactly. Returns True if anything was written.
+    Scores each model's stored oracle answer against the human reference using
+    the same metric machinery the live pipeline uses (reused verbatim), so the
+    numbers match a fresh run exactly. ``ref_cols`` are the human-reference
+    columns the metric reads from ``samples_<task>.csv``; ``transform`` collapses
+    an oracle cell into the form the metric reads from a service output (None for
+    ASR/MT text; the top-1 label for FER). Returns True if anything was written.
     """
-    from service_invocations.speech_recognition.wer import (
-        compute_wer_rows,
-        compute_wer_summary_rows,
-    )
-
     oracle = _read_csv_or_none(task_dir / "oracle.csv")
     if oracle is None or "llm_oracle" not in oracle.columns:
         print(f"[regenerate] {task_dir.name}: no usable oracle.csv — skipping backfill.")
         return False
     label_df = _read_csv_or_none(samples_csv)
-    if label_df is None or not {"id", "text"}.issubset(label_df.columns):
-        print(f"[regenerate] {task_dir.name}: {samples_csv.name} lacks id/text — skipping backfill.")
+    needed = {"id", *ref_cols}
+    if label_df is None or not needed.issubset(label_df.columns):
+        print(f"[regenerate] {task_dir.name}: {samples_csv.name} lacks "
+              f"{sorted(needed)} — skipping backfill.")
         return False
 
     wrote = False
@@ -101,17 +110,17 @@ def _backfill_llmaas_speech(task_dir: Path, samples_csv: Path) -> bool:
         model = str(meta.get("model", "default"))
 
         oracle_results = grp[["id", "llm_oracle"]].copy()
-        # Feed the oracle answer as the only pseudo-service; compute_wer_rows then
-        # scores it against the human reference (human_wer) and against itself
-        # (oracle_wer == 0). split_llmaas_rows isolates those rows.
-        augmented = {LLMAAS_SERVICE: oracle_as_service(oracle_results)}
-        per_sample = compute_wer_rows(augmented, oracle_results, label_df)
+        # Feed the oracle answer as the only pseudo-service; compute_rows then
+        # scores it against the human reference (human_*) and against itself
+        # (oracle_* is the trivial self-match). split_llmaas_rows isolates them.
+        augmented = {LLMAAS_SERVICE: oracle_as_service(oracle_results, transform=transform)}
+        per_sample = compute_rows(augmented, oracle_results, label_df)
         _, llmaas_rows = split_llmaas_rows(per_sample)
         if not llmaas_rows:
             continue
-        write_llmaas_accuracy(task_dir, "speech_recognition", prompt, model, llmaas_rows)
-        summary = compute_wer_summary_rows(llmaas_rows, [LLMAAS_SERVICE])
-        write_llmaas_summary(task_dir, "speech_recognition", prompt, model, summary)
+        write_llmaas_accuracy(task_dir, task, prompt, model, llmaas_rows)
+        summary = compute_summary(llmaas_rows, [LLMAAS_SERVICE])
+        write_llmaas_summary(task_dir, task, prompt, model, summary)
         wrote = True
 
     if wrote:
@@ -119,11 +128,47 @@ def _backfill_llmaas_speech(task_dir: Path, samples_csv: Path) -> bool:
     return wrote
 
 
-# Per-task backfill dispatch. Speech is implemented (WER). LT (COMET) and ED can
-# be added the same way using their metric builders; until then those tasks
-# simply re-plot whatever CSVs already exist.
+def _backfill_llmaas_speech(task_dir: Path, samples_csv: Path) -> bool:
+    from service_invocations.speech_recognition.wer import (
+        compute_wer_rows,
+        compute_wer_summary_rows,
+    )
+    return _backfill_llmaas(
+        task_dir, samples_csv, task="speech_recognition", ref_cols=("text",),
+        compute_rows=compute_wer_rows, compute_summary=compute_wer_summary_rows,
+    )
+
+
+def _backfill_llmaas_language(task_dir: Path, samples_csv: Path) -> bool:
+    from service_invocations.language_translation.comet import (
+        compute_comet_rows,
+        compute_comet_summary_rows,
+    )
+    return _backfill_llmaas(
+        task_dir, samples_csv, task="language_translation", ref_cols=("english", "french"),
+        compute_rows=compute_comet_rows, compute_summary=compute_comet_summary_rows,
+    )
+
+
+def _backfill_llmaas_emotion(task_dir: Path, samples_csv: Path) -> bool:
+    from service_invocations.emotion_detection.metrics import (
+        compute_emotion_rows,
+        compute_emotion_summary_rows,
+        oracle_top_emotion,
+    )
+    return _backfill_llmaas(
+        task_dir, samples_csv, task="emotion_detection", ref_cols=("label",),
+        compute_rows=compute_emotion_rows, compute_summary=compute_emotion_summary_rows,
+        transform=oracle_top_emotion,
+    )
+
+
+# Per-task backfill dispatch. All three tasks reconstruct LLMaaS from oracle.csv
+# + samples_<task>.csv using their own metric builders (WER / COMET / FER).
 _BACKFILL = {
     "speech_recognition": _backfill_llmaas_speech,
+    "language_translation": _backfill_llmaas_language,
+    "emotion_detection": _backfill_llmaas_emotion,
 }
 
 

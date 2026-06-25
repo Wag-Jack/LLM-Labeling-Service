@@ -475,7 +475,17 @@ def _entity_accuracy_frame(
     return pd.concat(frames, ignore_index=True, sort=False)
 
 
-def _flat_entity_bar(ax, frame: pd.DataFrame, metric: str, ylabel: str) -> None:
+# Human-readable name for a task's third-party services, used in plot legends
+# (the accuracy charts put these bars next to the LLM-as-a-service bars).
+_SERVICE_LEGEND = {
+    "speech_recognition": "STT service",
+    "language_translation": "MT service",
+    "emotion_detection": "FER service",
+}
+
+
+def _flat_entity_bar(ax, frame: pd.DataFrame, metric: str, ylabel: str,
+                     service_label: str = "service") -> None:
     """Flat (single-series) bar chart of ``metric`` per entity, colored by kind.
 
     Every bar is value-labelled (2 dp) and the y-axis is tight-autoscaled to the
@@ -500,7 +510,7 @@ def _flat_entity_bar(ax, frame: pd.DataFrame, metric: str, ylabel: str) -> None:
         plt.Rectangle((0, 0), 1, 1, color="#4C72B0"),
         plt.Rectangle((0, 0), 1, 1, color="#C44E52"),
     ]
-    ax.legend(handles, ["speech/STT service", "LLM (oracle) as service"],
+    ax.legend(handles, [service_label, "LLM (oracle) as service"],
               loc="best", fontsize="small")
 
 
@@ -515,7 +525,8 @@ def _plot_accuracy_all_entities(
     if combined.empty:
         return
     fig, ax = plt.subplots(figsize=(max(8.0, 0.7 * len(combined) + 4), 5))
-    _flat_entity_bar(ax, combined, metric, cfg["ylabel"])
+    _flat_entity_bar(ax, combined, metric, cfg["ylabel"],
+                     service_label=_SERVICE_LEGEND.get(task, "service"))
     ax.set_title(
         f"{task} – accuracy vs human reference: services and LLMs"
         f"{_avg_suffix(summary)}"
@@ -715,36 +726,88 @@ def plot_judge_bundle(task_dir: Path, task: str) -> None:
     _plot_cost_breakdown(task_dir, task, paradigm="judge", out_dir=out_dir)
 
 
+# Suffix the human-loop writers append to a prompt name when the sample was run
+# against the `human-loop-no-threshold` paradigm (a prompt that does NOT disclose
+# the confidence cutoff). It is the only marker separating the two prompt
+# strategies in human_loop.csv, so the plots key the threshold/no-threshold split
+# off it.
+_NO_THRESHOLD_SUFFIX = "__no-threshold"
+
+
+def _partition_human_loop(hl: pd.DataFrame) -> list[tuple[str, str, pd.DataFrame]]:
+    """Split human_loop rows by prompt strategy: confidence threshold disclosed in
+    the prompt vs not.
+
+    Returns (dir_slug, label, frame) tuples. The ``__no-threshold`` suffix is
+    stripped from the no-threshold slice's ``prompt`` column so its plots label the
+    clean prompt stem. Empty slices are dropped; a frame without a ``prompt`` column
+    (legacy) is returned whole under the canonical slug.
+    """
+    if hl is None or hl.empty:
+        return []
+    if "prompt" not in hl.columns:
+        return [("human_loop", "human-loop", hl)]
+    is_nt = hl["prompt"].astype(str).str.endswith(_NO_THRESHOLD_SUFFIX)
+    out: list[tuple[str, str, pd.DataFrame]] = []
+    with_thr = hl[~is_nt]
+    if not with_thr.empty:
+        out.append(("human_loop", "human-loop (threshold in prompt)", with_thr.copy()))
+    nt = hl[is_nt].copy()
+    if not nt.empty:
+        nt["prompt"] = nt["prompt"].astype(str).str.slice(0, -len(_NO_THRESHOLD_SUFFIX))
+        out.append(("human_loop_no_threshold", "human-loop (no threshold in prompt)", nt))
+    return out
+
+
+def _drop_no_threshold(hl: pd.DataFrame | None) -> pd.DataFrame | None:
+    """Keep only the threshold-disclosed human-loop rows (drop ``__no-threshold``).
+
+    The cross-paradigm summary treats ``human_loop`` as the canonical threshold
+    variant so its bars/points aren't a silent average of two prompt strategies;
+    the no-threshold variant is compared in its own dedicated bundle instead.
+    """
+    if hl is None or hl.empty or "prompt" not in hl.columns:
+        return hl
+    df = hl[~hl["prompt"].astype(str).str.endswith(_NO_THRESHOLD_SUFFIX)]
+    return df if not df.empty else None
+
+
 def plot_human_loop_bundle(task_dir: Path, task: str) -> None:
     hl = _read_csv_or_none(task_dir / "human_loop.csv")
     if hl is None:
         print(f"[plot] {task}/human_loop: no human_loop.csv, skipping")
         return
-    out_dir = _ensure_dir(task_dir / "plots" / "human_loop")
-    _plot_winner_and_consistency(hl, task_dir, task, out_dir,
-                                 paradigm_label="human-loop", exclude_fallback=True)
-    _plot_score_distributions(hl, task, out_dir, paradigm_label="human-loop")
-    _plot_confidence_histogram(hl, task, out_dir)
+    for slug, label, slice_df in _partition_human_loop(hl):
+        out_dir = _ensure_dir(task_dir / "plots" / slug)
+        _plot_winner_and_consistency(slice_df, task_dir, task, out_dir,
+                                     paradigm_label=label, exclude_fallback=True)
+        _plot_score_distributions(slice_df, task, out_dir, paradigm_label=label)
+        _plot_confidence_histogram(slice_df, task, out_dir, paradigm_label=label)
 
-    if "fallback_used" in hl.columns:
-        # fallback is per (sample, model, prompt) but stored per-service-row;
-        # collapse so each sample/model counts once.
-        fallback = (
-            hl.drop_duplicates(["prompt", "model", "id"])
-            .groupby(["prompt", "model"])["fallback_used"]
-            .mean()
-            .reset_index()
-        )
-        fig, ax = plt.subplots(figsize=(8, 5))
-        pivot = _grouped_bar(ax, fallback, x="model", y="fallback_used", hue="prompt",
-                             ylabel="Fraction of samples that fell back to human")
-        _tight_ylim(ax, *_pivot_range(pivot))
-        ax.set_title(f"{task} – human-loop fallback rate")
-        fig.tight_layout()
-        fig.savefig(out_dir / "human_fallback_rate.png", dpi=150)
-        plt.close(fig)
+        if "fallback_used" in slice_df.columns:
+            # fallback is per (sample, model, prompt) but stored per-service-row;
+            # collapse so each sample/model counts once.
+            fallback = (
+                slice_df.drop_duplicates(["prompt", "model", "id"])
+                .groupby(["prompt", "model"])["fallback_used"]
+                .mean()
+                .reset_index()
+            )
+            fig, ax = plt.subplots(figsize=(8, 5))
+            pivot = _grouped_bar(ax, fallback, x="model", y="fallback_used", hue="prompt",
+                                 ylabel="Fraction of samples that fell back to human")
+            _tight_ylim(ax, *_pivot_range(pivot))
+            ax.set_title(f"{task} – {label}: fallback rate")
+            fig.tight_layout()
+            fig.savefig(out_dir / "human_fallback_rate.png", dpi=150)
+            plt.close(fig)
 
-    _plot_cost_breakdown(task_dir, task, paradigm="human_loop", out_dir=out_dir)
+        # LLM spend is recorded per paradigm only (cost.csv has no prompt column),
+        # so the two prompt strategies cannot be costed apart. Emit the combined
+        # human-loop cost in the canonical dir only, rather than duplicate the same
+        # number into the no-threshold dir as if it were isolated there.
+        if slug == "human_loop":
+            _plot_cost_breakdown(task_dir, task, paradigm="human_loop", out_dir=out_dir)
 
 
 _CONFIDENCE_BINS = np.linspace(0.0, 1.0, 21)
@@ -793,7 +856,8 @@ def _draw_confidence_hist(ax, df: pd.DataFrame, models: list[str],
     return max_count
 
 
-def _plot_confidence_histogram(hl: pd.DataFrame, task: str, out_dir: Path) -> None:
+def _plot_confidence_histogram(hl: pd.DataFrame, task: str, out_dir: Path,
+                               paradigm_label: str = "human-loop") -> None:
     """Overlaid confidence histograms — aggregate, plus per-prompt subplots.
 
     Confidence is recorded per (prompt, model, sample) but duplicated across
@@ -821,7 +885,7 @@ def _plot_confidence_histogram(hl: pd.DataFrame, task: str, out_dir: Path) -> No
     fig, ax = plt.subplots(figsize=(11, 5.5))
     _draw_confidence_hist(ax, df, models, model_styles)
     ax.set_title(
-        f"{task} – human-loop: confidence distribution by model{_avg_suffix(df)}"
+        f"{task} – {paradigm_label}: confidence distribution by model{_avg_suffix(df)}"
     )
     ax.legend(loc="best", fontsize="small", framealpha=0.9)
     fig.tight_layout()
@@ -858,7 +922,7 @@ def _plot_confidence_histogram(hl: pd.DataFrame, task: str, out_dir: Path) -> No
                 for c in range(ncols):
                     axes[r][c].set_ylim(0, top * 1.12)
     fig.suptitle(
-        f"{task} – human-loop: confidence distribution by model (per prompt)"
+        f"{task} – {paradigm_label}: confidence distribution by model (per prompt)"
     )
     fig.tight_layout()
     fig.savefig(out_dir / "confidence_histogram_by_prompt.png", dpi=150)
@@ -1085,6 +1149,8 @@ def _per_sample_label_accuracy(task_dir: Path, task: str) -> pd.DataFrame:
         ("human_loop", task_dir / "human_loop.csv", True),
     ):
         df = _read_csv_or_none(path)
+        if paradigm_name == "human_loop":
+            df = _drop_no_threshold(df)
         if df is None or df.empty or not best:
             continue
         correctness = _winner_correctness(df, best, exclude_fallback=exclude_fallback)
@@ -1160,6 +1226,8 @@ def _plot_paradigm_consistency(task_dir: Path, task: str, out_dir: Path) -> None
         ("human_loop", task_dir / "human_loop.csv", True),
     ):
         df = _read_csv_or_none(path)
+        if paradigm_name == "human_loop":
+            df = _drop_no_threshold(df)
         if df is None or df.empty:
             continue
         correctness = _winner_correctness(df, best, exclude_fallback=exclude_fallback)

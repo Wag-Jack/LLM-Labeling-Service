@@ -30,6 +30,8 @@ from typing import Any, Dict, List
 import pandas as pd
 import yaml
 
+from service_invocations.core import run_context as rc
+
 
 _PRICING_CACHE: Dict[Path, Dict[str, Dict[str, Dict[str, Any]]]] = {}
 _LOCK = Lock()
@@ -81,7 +83,7 @@ def _load_pricing(services_path: Path) -> Dict[str, Dict[str, Dict[str, Any]]]:
 
 
 def _default_services_path() -> Path:
-    return Path.cwd() / "config" / "services.yaml"
+    return rc.config_path("services.yaml")
 
 
 def audio_minutes(row: Any) -> float | None:
@@ -236,6 +238,42 @@ class ServiceCostTracker:
             df = pd.concat([existing, df], ignore_index=True)
         df.to_csv(log_path, index=False)
         return log_path
+
+    def seed_from_csv(self, path: Path, task_filter: str | None = None) -> int:
+        """Preload previously-logged rows from a ``service_cost.csv``.
+
+        Service-side companion to :meth:`CostTracker.seed_from_csv`: on a
+        resumed run, services that were already complete are skipped and never
+        re-recorded, so without seeding ``write`` replaces the task slice with
+        only the freshly-invoked subset. No-op when ``path`` is missing or has
+        no matching rows; returns the number of rows seeded.
+        """
+        if not path.exists():
+            return 0
+        df = pd.read_csv(path)
+        if task_filter is not None and "task" in df.columns:
+            df = df[df["task"] == task_filter]
+        if df.empty:
+            return 0
+
+        def _opt_float(v: Any) -> float | None:
+            return None if pd.isna(v) else float(v)
+
+        with _LOCK:
+            for _, row in df.iterrows():
+                unit = row.get("unit")
+                self.entries.append(
+                    ServiceCostEntry(
+                        timestamp=str(row.get("timestamp", "")),
+                        task=str(row.get("task", "")),
+                        service=str(row.get("service", "")),
+                        sample_id=str(row.get("sample_id", "")),
+                        unit=None if pd.isna(unit) else str(unit),
+                        usage_units=_opt_float(row.get("usage_units")),
+                        cost_usd=_opt_float(row.get("cost_usd")),
+                    )
+                )
+        return int(len(df))
 
 
 _SESSION_SERVICE = ServiceCostTracker()

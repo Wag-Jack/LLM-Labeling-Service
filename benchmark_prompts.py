@@ -7,7 +7,10 @@ from service_invocations import invoke_language_translation as ilt
 from service_invocations import invoke_emotion_detection as ied
 from service_invocations.core import run_context as rc
 from service_invocations.core.cost_tracker import session_tracker
-from service_invocations.core.oracle_utils import oracle_frame_usable
+from service_invocations.core.oracle_utils import (
+    is_fresh_run_requested,
+    oracle_frame_usable,
+)
 from service_invocations.core.service_cost import (
     format_cost_summary,
     session_service_tracker,
@@ -18,6 +21,13 @@ from service_invocations.core.results_io import (
     accuracy_slice_complete,
     write_accuracy,
     write_accuracy_summary,
+    write_llmaas_accuracy,
+    write_llmaas_summary,
+)
+from service_invocations.core.llmaas import (
+    LLMAAS_SERVICE,
+    oracle_as_service,
+    split_llmaas_rows,
 )
 from service_invocations.core.sds import compute_discrimination, save_discrimination
 from service_invocations.invoke_speech_recognition import run_speech_recognition
@@ -31,14 +41,13 @@ from service_invocations.emotion_detection import emotion_oracle, emotion_judge,
 from service_invocations.emotion_detection.metrics import (
     compute_emotion_rows,
     compute_emotion_summary_rows,
+    oracle_top_emotion,
 )
 from data_management.edacc import load_edacc
 from data_management.en_fr import load_en_fr
 from data_management.affectnet import load_affectnet
 
 DEFAULT_NUM_SAMPLES = 5
-
-_PROMPTS_CONFIG_PATH = Path.cwd() / "config" / "prompts.yaml"
 
 
 def _load_prompt_selection(task_name: str, paradigm: str) -> dict[str, bool] | None:
@@ -48,9 +57,10 @@ def _load_prompt_selection(task_name: str, paradigm: str) -> dict[str, bool] | N
     config/prompts.yaml is missing or the relevant section is absent/null). A
     dict maps prompt stems to whether they should run.
     """
-    if not _PROMPTS_CONFIG_PATH.exists():
+    prompts_path = rc.config_path("prompts.yaml")
+    if not prompts_path.exists():
         return None
-    with _PROMPTS_CONFIG_PATH.open("r", encoding="utf-8") as f:
+    with prompts_path.open("r", encoding="utf-8") as f:
         config = yaml.safe_load(f) or {}
     if not isinstance(config, dict):
         return None
@@ -102,8 +112,15 @@ def _run_services_only(invoke_module, df, runner):
     return out
 
 
-def _write_accuracy_for(task_dir, task_name, prompt, oracle_results, label_results, label_df, compute_rows, compute_summary):
+def _write_accuracy_for(task_dir, task_name, prompt, oracle_results, label_results, label_df,
+                        compute_rows, compute_summary, oracle_transform=None):
     """Run the per-task accuracy helpers and persist into accuracy.csv / summary.
+
+    The model's own oracle answer is also scored as a standalone pseudo-service
+    (LLMaaS), so its quality-without-services lands in llmaas_accuracy.csv /
+    llmaas_summary.csv and the LLM shows up as a peer bar in the accuracy plots.
+    ``oracle_transform`` collapses an oracle cell into the form the metric reads
+    from a service output (None for ASR/MT text; the top-1 label for FER).
 
     On a continued run, a (prompt, model) slice that is already fully present in
     accuracy.csv is skipped — so we don't reload the COMET checkpoint or re-score
@@ -122,10 +139,22 @@ def _write_accuracy_for(task_dir, task_name, prompt, oracle_results, label_resul
         if rc.is_continue() and accuracy_slice_complete(task_dir, prompt, model_name, services, sample_ids):
             print(f"[resume] {task_name} metrics for {model_name}/{prompt} already complete — skipping.")
             return
-        per_sample = compute_rows(label_results, model_oracle, label_df)
-        summary = compute_summary(per_sample, services)
-        write_accuracy(task_dir, task_name, prompt, model_name, per_sample)
+        # Score the real services AND the oracle-as-a-service in one pass, then
+        # split: accuracy.csv stays services-only (it drives best-service /
+        # winner-consistency logic) while the LLMaaS rows go to their own files.
+        augmented = {
+            **label_results,
+            LLMAAS_SERVICE: oracle_as_service(model_oracle, transform=oracle_transform),
+        }
+        per_sample = compute_rows(augmented, model_oracle, label_df)
+        service_rows, llmaas_rows = split_llmaas_rows(per_sample)
+        summary = compute_summary(service_rows, services)
+        write_accuracy(task_dir, task_name, prompt, model_name, service_rows)
         write_accuracy_summary(task_dir, task_name, prompt, model_name, summary)
+        if llmaas_rows:
+            llmaas_summary = compute_summary(llmaas_rows, [LLMAAS_SERVICE])
+            write_llmaas_accuracy(task_dir, task_name, prompt, model_name, llmaas_rows)
+            write_llmaas_summary(task_dir, task_name, prompt, model_name, llmaas_summary)
 
     if isinstance(oracle_results, dict):
         for model_name, model_oracle in oracle_results.items():
@@ -236,6 +265,7 @@ def _benchmark_emotion(affectnet_df, service_results):
             rc.task_results_dir("emotion_detection"), "emotion_detection", prompt,
             oracle_results, service_results, affectnet_df,
             compute_emotion_rows, compute_emotion_summary_rows,
+            oracle_transform=oracle_top_emotion,
         )
 
     if service_results:
@@ -271,7 +301,7 @@ def _compute_plan(*tasks) -> dict:
     """
     try:
         from service_invocations.models import get_enabled_models
-        models_path = Path.cwd() / "config" / "models.yaml"
+        models_path = rc.config_path("models.yaml")
         n_models = len(get_enabled_models(models_path))
     except Exception:
         n_models = 0
@@ -304,9 +334,9 @@ def _load_or_restore(name: str, loader, datasets: dict | None, banner: str):
 
 def run_all_prompts(num_samples: int = DEFAULT_NUM_SAMPLES, randomize: bool = True,
                     seed: int | None = None, datasets: dict | None = None):
-    # Order: MT -> ASR -> FER. The FER providers currently have account-side
-    # issues (Imentiv out of credits, SkyBiometry mood not provisioned), so the
-    # fully-working tasks run first and FER runs last.
+    # Order: MT -> ASR -> FER. FER now runs the two local libraries (FER,
+    # DeepFace) alongside the cloud services; it runs last so the network-bound
+    # tasks complete first.
     europarl_df = _load_or_restore(
         "language_translation",
         lambda: load_en_fr(num_samples, randomize=randomize, seed=seed),
@@ -362,6 +392,8 @@ def run_all_prompts(num_samples: int = DEFAULT_NUM_SAMPLES, randomize: bool = Tr
         ("emotion_detection", emotion_oracle._PROMPTS_ROOT, affectnet_df, bool(emotion_results)),
     ))
 
+    _seed_existing_costs()
+
     _benchmark_language(europarl_df, language_results)
     _flush_task_cost("language_translation")
     _benchmark_speech(edacc_df, speech_results)
@@ -383,6 +415,25 @@ def run_all_prompts(num_samples: int = DEFAULT_NUM_SAMPLES, randomize: bool = Tr
     print(format_cost_summary(scope="benchmark"))
 
     replot_all()
+
+
+def _seed_existing_costs() -> None:
+    """Preload prior per-task cost CSVs into the session trackers on resume.
+
+    A resumed benchmark skips already-completed samples, so their costs never
+    re-enter the trackers. Without seeding, the per-task ``_flush_task_cost``
+    and the run-level write at the end would replace each task slice with only
+    this run's freshly-invoked subset and under-report the cumulative cost.
+    No-op on a fresh run or when no prior CSV exists.
+    """
+    if not rc.is_continue() or is_fresh_run_requested():
+        return
+    for task_name in _TASK_NAMES:
+        task_dir = rc.task_results_dir(task_name)
+        session_tracker().seed_from_csv(task_dir / "cost.csv", task_filter=task_name)
+        session_service_tracker().seed_from_csv(
+            task_dir / "service_cost.csv", task_filter=task_name
+        )
 
 
 def _flush_task_cost(task_name: str) -> None:

@@ -83,28 +83,17 @@ emotion_detection:
     pricing:
       unit: image
       usd_per_image: 0.001  # Detect API paid tier (verify; free concurrency tier exists)
-  imentiv:
+  fer:
+    # Local, open-source `fer` library (Keras mini-Xception). Runs on-device with
+    # no API key and no network call, so there is no per-image cloud cost.
     enabled: false
     pricing:
       unit: image
-      usd_per_image: 0.001  # Approx; Imentiv bills per credit/plan, not a public per-image list price (verify)
-  skybiometry:
-    # DISABLED: mood/emotion is not provisioned on this API key. Two issues were
-    # found and only the first is a code bug:
-    #   1. (fixed) the old parser misread mood's shape -- per the live docs,
-    #      faces/detect returns mood as {value, confidence} plus seven sibling
-    #      per-emotion attributes, NOT a nested per-emotion dict; the old code
-    #      iterated mood.items() and dropped every result. services/skybiometry.py
-    #      now parses the documented shape and uses the "aggressive" detector
-    #      (faces register fine -- detect returns 1 tag).
-    #   2. (blocker) this key does NOT return mood. Live-verified 2026-06-17 with
-    #      ample quota: attributes=all returns every attribute EXCEPT mood and
-    #      ethnicity; attributes=mood is accepted (no BAD_ATTRIBUTES) but returns
-    #      only `face`. So mood is gated at the account/plan level on SkyBiometry,
-    #      not in code. Enable mood for the key (SkyBiometry dashboard / support),
-    #      confirm with the self-test in services/README.md, then flip to true --
-    #      no code change needed.
+      usd_per_image: 0.0  # Local inference -- free (records cost_usd=0, not NaN)
+  deepface:
+    # Local, open-source `deepface` library. Runs on-device with no API key and
+    # no network call, so there is no per-image cloud cost.
     enabled: false
     pricing:
       unit: image
-      usd_per_image: 0.001  # Approx; SkyBiometry bills per monthly plan, not per call (verify)
+      usd_per_image: 0.0  # Local inference -- free (records cost_usd=0, not NaN)

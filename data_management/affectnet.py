@@ -285,8 +285,9 @@ def load_affectnet(amount=50, aws=False, randomize=True, seed=None):
 
     # Preprocessing is applied uniformly to the working image so EVERY service
     # and the LLM paradigms receive identical input (fairness). Padding a margin
-    # around AffectNet's tight 96x96 crops is required for some detectors (e.g.
-    # Imentiv) and harmless for the rest. Disable with FER_PREPROCESS=0.
+    # around AffectNet's tight 96x96 crops helps detectors that need surrounding
+    # context register the face, and is harmless to the rest. Disable with
+    # FER_PREPROCESS=0.
     preprocess = os.getenv("FER_PREPROCESS", "1").strip().lower() not in ("0", "false", "no", "")
     pad_ratio = float(os.getenv("FER_PREPROCESS_PAD_RATIO", "0.4"))
     min_size = int(os.getenv("FER_PREPROCESS_MIN_SIZE", "0"))  # 0 = pad only, no upscale

@@ -1,6 +1,6 @@
 models:
   gemini_3_5_flash:
-    enabled: true
+    enabled: false
     provider: gemini
     model_id: gemini-3.5-flash
     temperature: 0

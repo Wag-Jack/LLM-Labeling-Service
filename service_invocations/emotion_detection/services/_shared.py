@@ -149,7 +149,7 @@ def call_until_emotion(
 
     Permanent client errors (a non-transient 4xx such as 401/402/403/404) are
     the exception: retrying them never helps, so we stop on the first one rather
-    than burn the remaining attempts + backoff (e.g. Imentiv's
+    than burn the remaining attempts + backoff (e.g. a cloud service's
     ``402 Insufficient credits`` would otherwise repeat for every image).
 
     The LAST attempt's result is returned regardless (so the sample is still
@@ -241,16 +241,12 @@ SERVICE_EMOTION_CAPABILITIES = {
     "aws_rekognition": {"returns_contempt": False, "multi_emotion": True},
     "faceplusplus": {"returns_contempt": False, "multi_emotion": True},
     "luxand_facesdk": {"returns_contempt": True, "multi_emotion": True},
-    # Imentiv returns 8 emotions INCLUDING contempt (dropped + renormalized).
-    "imentiv": {"returns_contempt": True, "multi_emotion": True},
-    # SkyBiometry is DISABLED (see services.yaml): mood/emotion is not
-    # provisioned on the current key -- live-verified that faces/detect returns
-    # every attribute except mood + ethnicity. Per the docs it WOULD be
-    # multi-emotion when mood is enabled (a confidence per basic emotion alongside
-    # the dominant `mood`), and the parser now handles that shape; but the
-    # live-verified behavior on this key is "no emotion data", so multi_emotion is
-    # recorded False to match reality. No contempt class.
-    "skybiometry": {"returns_contempt": False, "multi_emotion": False},
+    # FER (local `fer` library): 7-emotion distribution (0-1, sums ~1.0), no
+    # contempt class, so nothing is dropped or renormalized.
+    "fer": {"returns_contempt": False, "multi_emotion": True},
+    # DeepFace (local `deepface` library): 7-emotion distribution (rescaled to
+    # 0-1), no contempt class, so nothing is dropped or renormalized.
+    "deepface": {"returns_contempt": False, "multi_emotion": True},
 }
 
 
@@ -274,10 +270,10 @@ def renormalize_scores(
     <1. Renormalizing redistributes that dropped mass proportionally so the
     output is again a proper distribution over the AffectNet-7 classes.
 
-    Only meaningful for services whose scores form a distribution. Services
-    that report independent per-emotion confidences (e.g. Rekognition,
-    SkyBiometry) should NOT renormalize, as rescaling would distort their
-    native semantics. None entries are preserved as None.
+    Only meaningful for services whose scores form a distribution that included
+    a contempt mass. Services that report independent per-emotion confidences
+    (e.g. Rekognition), or a distribution with no contempt class to drop (e.g.
+    FER, DeepFace), should NOT renormalize. None entries are preserved as None.
     """
     present = {k: v for k, v in scores.items() if v is not None}
     total = sum(present.values())
@@ -371,7 +367,7 @@ def preprocess_face_image(
 
     Adds a uniform gray border (``pad_ratio`` of the larger dimension) so face
     detectors that need surrounding context can localize tightly-cropped faces
-    (AffectNet ships 96x96 crops; Imentiv's detector finds 0 faces without a
+    (AffectNet ships 96x96 crops; some detectors find 0 faces on them without a
     margin). Optionally upscales so the larger dimension is at least
     ``min_size`` (0 = no upscale; padding alone preserves the native face
     resolution and was verified sufficient for detection across all services).
